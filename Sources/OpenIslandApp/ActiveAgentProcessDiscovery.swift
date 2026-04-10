@@ -67,10 +67,6 @@ struct ActiveAgentProcessDiscovery {
         var claimedKeys: Set<String> = []
 
         for process in processes {
-            guard process.terminalTTY != nil else {
-                continue
-            }
-
             if isCodexProcess(command: process.command) {
                 guard let snapshot = codexSnapshot(for: process, processesByPID: processesByPID) else {
                     continue
@@ -82,6 +78,10 @@ struct ActiveAgentProcessDiscovery {
                 }
 
                 snapshots.append(snapshot)
+                continue
+            }
+
+            guard process.terminalTTY != nil else {
                 continue
             }
 
@@ -151,18 +151,46 @@ struct ActiveAgentProcessDiscovery {
         for process: RunningProcess,
         processesByPID: [String: RunningProcess]
     ) -> ProcessSnapshot? {
-        guard let lsofOutput = lsofOutput(pid: process.pid),
-              let transcriptPath = matchingPath(in: lsofOutput, containing: "/.codex/sessions/", suffix: ".jsonl"),
-              let sessionID = firstUUID(in: transcriptPath) else {
-            return nil
+        let hostApplication = terminalApp(for: process, processesByPID: processesByPID)
+            ?? codexHostApplication(for: process.command)
+
+        guard let lsofOutput = lsofOutput(pid: process.pid) else {
+            return ProcessSnapshot(
+                tool: .codex,
+                sessionID: nil,
+                workingDirectory: nil,
+                terminalTTY: process.terminalTTY,
+                terminalApp: hostApplication
+            )
+        }
+
+        let transcriptPath: String?
+        let sessionID: String?
+        let resolvedWorkingDirectory: String?
+
+        if process.terminalTTY != nil {
+            // TTY-backed Codex CLI sessions still map cleanly to a single
+            // rollout file, so keep the precise session ID when available.
+            transcriptPath = matchingPath(in: lsofOutput, containing: "/.codex/sessions/", suffix: ".jsonl")
+            sessionID = transcriptPath.flatMap(firstUUID)
+            resolvedWorkingDirectory = workingDirectory(from: lsofOutput)
+        } else {
+            // Codex.app's `codex app-server` keeps many historical rollout
+            // files open at the same time and reports `/` as cwd, so treating
+            // any one open file as "the active session" produces false
+            // bindings. Return only coarse presence data here.
+            transcriptPath = nil
+            sessionID = nil
+            resolvedWorkingDirectory = nil
         }
 
         var snapshot = ProcessSnapshot(
             tool: .codex,
             sessionID: sessionID,
-            workingDirectory: workingDirectory(from: lsofOutput),
+            workingDirectory: resolvedWorkingDirectory,
             terminalTTY: process.terminalTTY,
-            terminalApp: terminalApp(for: process, processesByPID: processesByPID)
+            terminalApp: hostApplication,
+            transcriptPath: transcriptPath
         )
 
         // If terminalApp is nil and we have a TTY, try to resolve tmux info
@@ -179,6 +207,15 @@ struct ActiveAgentProcessDiscovery {
         }
 
         return snapshot
+    }
+
+    /// Maps the desktop app-hosted Codex process back to the supported product
+    /// surface name when there is no parent terminal application to inspect.
+    /// - Parameter command: Raw process command line returned by `ps`.
+    /// - Returns: `"Codex"` for the desktop app-hosted process, otherwise `nil`.
+    private func codexHostApplication(for command: String) -> String? {
+        let lowered = command.lowercased()
+        return lowered.contains("/applications/codex.app/") ? "Codex" : nil
     }
 
     private func isClaudeSubagentWorktree(_ path: String) -> Bool {
@@ -486,6 +523,10 @@ struct ActiveAgentProcessDiscovery {
     private func isCodexProcess(command: String) -> Bool {
         let lowered = command.lowercased()
         guard let firstToken = lowered.split(separator: " ").first.map(String.init) else {
+            return false
+        }
+
+        if firstToken == "/applications/codex.app/contents/macos/codex" {
             return false
         }
 

@@ -52,13 +52,15 @@ struct ActiveAgentProcessDiscoveryTests {
             terminalTTY: "/dev/ttys002",
             terminalApp: "Ghostty"
         )))
-        #expect(snapshots.contains(.init(
-            tool: .codex,
-            sessionID: "019d516f-71ee-7e40-bcff-502fedac0928",
-            workingDirectory: "/tmp/open-island",
-            terminalTTY: "/dev/ttys001",
-            terminalApp: "Ghostty"
-        )))
+        let codexSnapshot = snapshots.first(where: { $0.tool == .codex })
+        #expect(codexSnapshot?.sessionID == "019d516f-71ee-7e40-bcff-502fedac0928")
+        #expect(codexSnapshot?.workingDirectory == "/tmp/open-island")
+        #expect(codexSnapshot?.terminalTTY == "/dev/ttys001")
+        #expect(codexSnapshot?.terminalApp == "Ghostty")
+        #expect(
+            codexSnapshot?.transcriptPath
+                == "/Users/test/.codex/sessions/2026/04/03/rollout-2026-04-03T11-42-31-019d516f-71ee-7e40-bcff-502fedac0928.jsonl"
+        )
     }
 
     @Test
@@ -91,6 +93,40 @@ struct ActiveAgentProcessDiscoveryTests {
                 workingDirectory: "/tmp/open-island",
                 terminalTTY: "/dev/ttys002",
                 terminalApp: "Ghostty"
+            ),
+        ])
+    }
+
+    @Test
+    func discoverCodexDesktopAppServerWithoutTTYAsCoarsePresence() {
+        let discovery = ActiveAgentProcessDiscovery { executablePath, _ in
+            if executablePath == "/bin/ps" {
+                return """
+                  85661 85313 ?? /Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled
+                  85313 1 ?? /Applications/Codex.app/Contents/MacOS/Codex
+                """
+            }
+
+            guard executablePath == "/usr/sbin/lsof" else {
+                return nil
+            }
+
+            return """
+            p85661
+            fcwd
+            n/
+            """
+        }
+
+        let snapshots = discovery.discover()
+
+        #expect(snapshots == [
+            .init(
+                tool: .codex,
+                sessionID: nil,
+                workingDirectory: nil,
+                terminalTTY: nil,
+                terminalApp: "Codex"
             ),
         ])
     }

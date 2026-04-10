@@ -8,6 +8,10 @@ typealias ActiveProcessSnapshot = ActiveAgentProcessDiscovery.ProcessSnapshot
 @MainActor
 @Observable
 final class ProcessMonitoringCoordinator {
+    /// When Codex.app only exposes the coarse `codex app-server` process, keep
+    /// a recently updated attached running session alive for a bounded window
+    /// instead of immediately dropping it after the next poll.
+    private static let codexCoarsePresenceGraceWindow: TimeInterval = 15 * 60
 
     var isResolvingInitialLiveSessions = false
 
@@ -147,7 +151,10 @@ final class ProcessMonitoringCoordinator {
         _ = local.reconcileJumpTargets(jumpTargetUpdates)
 
         // Phase 1: populate isProcessAlive in parallel with existing system.
-        let aliveIDs = sessionIDsWithAliveProcesses(activeProcesses: activeProcesses)
+        let aliveIDs = sessionIDsWithAliveProcesses(
+            activeProcesses: activeProcesses,
+            sessions: local.sessions
+        )
         _ = local.markProcessLiveness(aliveSessionIDs: aliveIDs)
 
         // Resolve jump targets via the new focused resolver.
@@ -236,20 +243,30 @@ final class ProcessMonitoringCoordinator {
 
     // MARK: - Process liveness
 
+    /// Resolves the sessions that should remain process-alive for this poll.
+    /// - Parameters:
+    ///   - activeProcesses: Active agent process snapshots discovered from macOS.
+    ///   - sessions: The reconciled in-memory sessions for the current pass.
+    /// - Returns: Session IDs that should keep `isProcessAlive == true`.
     func sessionIDsWithAliveProcesses(
-        activeProcesses: [ActiveProcessSnapshot]
+        activeProcesses: [ActiveProcessSnapshot],
+        sessions: [AgentSession]
     ) -> Set<String> {
         var aliveIDs: Set<String> = []
-        let sessions = state.sessions
 
-        // Codex sessions: match by session ID directly.
-        let codexProcessIDs = Set(
-            activeProcesses
-                .filter { $0.tool == .codex }
-                .compactMap(\.sessionID)
-        )
-        for session in sessions where session.tool == .codex && !session.isDemoSession {
-            if codexProcessIDs.contains(session.id) {
+        let codexProcesses = activeProcesses.filter { $0.tool == .codex }
+        let trackedCodexSessions = sessions.filter { $0.tool == .codex && !sessionIsDemo($0) }
+
+        // Exact session-ID matches remain authoritative for TTY-backed Codex
+        // CLI processes.
+        let codexProcessIDs = Set(codexProcesses.compactMap(\.sessionID))
+        for session in trackedCodexSessions where codexProcessIDs.contains(session.id) {
+            aliveIDs.insert(session.id)
+        }
+
+        if codexProcesses.contains(where: { $0.sessionID == nil }) {
+            let now = Date.now
+            for session in trackedCodexSessions where shouldPreserveCodexLivenessFromCoarsePresence(session, now: now) {
                 aliveIDs.insert(session.id)
             }
         }
@@ -320,6 +337,34 @@ final class ProcessMonitoringCoordinator {
         }
 
         return aliveIDs
+    }
+
+    /// Keeps the live Codex session visible when the desktop app only exposes a
+    /// coarse `codex app-server` process instead of a per-session TTY process.
+    /// - Parameters:
+    ///   - session: The candidate Codex session being evaluated.
+    ///   - now: Reference timestamp for the recency check.
+    /// - Returns: `true` when the session should remain process-alive.
+    private func shouldPreserveCodexLivenessFromCoarsePresence(
+        _ session: AgentSession,
+        now: Date
+    ) -> Bool {
+        guard session.attachmentState == .attached else {
+            return false
+        }
+
+        guard session.phase == .running else {
+            return false
+        }
+
+        return now.timeIntervalSince(session.updatedAt) <= Self.codexCoarsePresenceGraceWindow
+    }
+
+    /// Local wrapper that keeps the codex/claude filtering call-sites readable.
+    /// - Parameter session: The session being checked.
+    /// - Returns: `true` when the session is a non-demo record.
+    private func sessionIsDemo(_ session: AgentSession) -> Bool {
+        session.isDemoSession
     }
 
     // MARK: - Synthetic Claude sessions

@@ -187,6 +187,72 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func codexDesktopProcessPresenceKeepsRecentAttachedRunningSessionAlive() {
+        let now = Date.now
+        let model = AppModel()
+
+        let session = AgentSession(
+            id: "codex-desktop-live",
+            title: "Codex · open-island",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Streaming response",
+            updatedAt: now.addingTimeInterval(-90)
+        )
+        model.state = SessionState(sessions: [session])
+
+        let aliveIDs = model.monitoring.sessionIDsWithAliveProcesses(
+            activeProcesses: [
+                .init(
+                    tool: .codex,
+                    sessionID: nil,
+                    workingDirectory: nil,
+                    terminalTTY: nil,
+                    terminalApp: "Codex"
+                ),
+            ],
+            sessions: model.state.sessions
+        )
+
+        #expect(aliveIDs.contains("codex-desktop-live"))
+    }
+
+    @Test
+    func codexDesktopProcessPresenceDoesNotReviveRecoveredStaleSession() {
+        let now = Date.now
+        let model = AppModel()
+
+        let session = AgentSession(
+            id: "codex-recovered",
+            title: "Codex · open-island",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .stale,
+            phase: .running,
+            summary: "Recovered from cache",
+            updatedAt: now.addingTimeInterval(-90)
+        )
+        model.state = SessionState(sessions: [session])
+
+        let aliveIDs = model.monitoring.sessionIDsWithAliveProcesses(
+            activeProcesses: [
+                .init(
+                    tool: .codex,
+                    sessionID: nil,
+                    workingDirectory: nil,
+                    terminalTTY: nil,
+                    terminalApp: "Codex"
+                ),
+            ],
+            sessions: model.state.sessions
+        )
+
+        #expect(!aliveIDs.contains("codex-recovered"))
+    }
+
+    @Test
     func jumpToSessionClosesOverlayBeforeTerminalJumpFinishes() async throws {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel { _ in
