@@ -7,6 +7,9 @@ import SwiftUI
 @MainActor
 @Observable
 final class AppModel {
+    /// Canonical title for the single settings window, shared with AppKit lookup.
+    static let settingsWindowTitle = "Open Island Settings"
+
     private static let soundMutedDefaultsKey = "overlay.sound.muted"
     private static let showDockIconDefaultsKey = "app.showDockIcon"
     private static let hapticFeedbackEnabledDefaultsKey = "app.hapticFeedbackEnabled"
@@ -304,7 +307,7 @@ final class AppModel {
     }
 
     @ObservationIgnored
-    var openSettingsWindow: (() -> Void)?
+    private var openSettingsWindow: (() -> Void)?
 
     @ObservationIgnored
     private var hasFinishedInit = false
@@ -838,9 +841,29 @@ final class AppModel {
         overlay.applyOverlayState(from: snapshot, presentOverlay: presentOverlay, autoCollapseNotificationCards: autoCollapseNotificationCards)
     }
 
+    /// Stores the SwiftUI window-opening action used by AppKit and menu-bar entry points.
+    /// - Parameter opener: Closure that materializes the settings `Window` scene when needed.
+    func registerSettingsWindowOpener(_ opener: @escaping () -> Void) {
+        openSettingsWindow = opener
+    }
+
+    /// Opens the settings window and brings it to the foreground.
+    ///
+    /// Complexity: O(n) over current `NSApp.windows`; n is the number of app windows.
     func showSettings() {
         openSettingsWindow?()
-        if let window = NSApp.windows.first(where: { $0.title == "Open Island Settings" }) {
+        focusSettingsWindowIfPresent()
+
+        // SwiftUI creates `Window` scenes asynchronously, so focus once more on
+        // the next main-actor turn after `openWindow(id:)` has materialized it.
+        Task { @MainActor [weak self] in
+            self?.focusSettingsWindowIfPresent()
+        }
+    }
+
+    /// Focuses the already-created settings window, if SwiftUI has materialized it.
+    private func focusSettingsWindowIfPresent() {
+        if let window = NSApp.windows.first(where: { $0.title == Self.settingsWindowTitle }) {
             window.orderFrontRegardless()
             window.makeKey()
         }

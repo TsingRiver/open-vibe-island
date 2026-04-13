@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import OpenIslandApp
@@ -786,5 +787,22 @@ struct AppModelSessionListTests {
 
         let claudeSessions = model.state.sessions.filter { $0.tool == .claudeCode }
         #expect(claudeSessions.count == 2)
+    }
+
+    @Test
+    func showSettingsInvokesRegisteredWindowOpener() {
+        _ = NSApplication.shared
+        let model = AppModel()
+        var openCount = 0
+
+        // The opener is normally provided by SwiftUI `openWindow(id:)`;
+        // the model must call it so menu-bar-only launches can create settings.
+        model.registerSettingsWindowOpener {
+            openCount += 1
+        }
+
+        model.showSettings()
+
+        #expect(openCount == 1)
     }
 }

@@ -103,14 +103,14 @@ struct OpenIslandApp: App {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        Window("Open Island Settings", id: "settings") {
+        Window(AppModel.settingsWindowTitle, id: "settings") {
             SettingsWindowContent(model: appDelegate.model)
         }
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
-                    openWindow(id: "settings")
+                    registerSettingsWindowOpener()
                     appDelegate.model.showSettings()
                 }
                 .keyboardShortcut(",", modifiers: .command)
@@ -125,11 +125,24 @@ struct OpenIslandApp: App {
 
         MenuBarExtra {
             MenuBarContentView(model: appDelegate.model)
+                .onAppear {
+                    registerSettingsWindowOpener()
+                }
         } label: {
             OpenIslandBrandMark(size: 18, style: .template)
                 .accessibilityLabel("Open Island")
+                .onAppear {
+                    registerSettingsWindowOpener()
+                }
         }
         .menuBarExtraStyle(.window)
+    }
+
+    /// Registers the SwiftUI `openWindow` action before non-SwiftUI controls ask the model to show settings.
+    private func registerSettingsWindowOpener() {
+        appDelegate.model.registerSettingsWindowOpener { [openWindow] in
+            openWindow(id: "settings")
+        }
     }
 }
 
@@ -143,7 +156,7 @@ private struct SettingsWindowContent: View {
     var body: some View {
         SettingsView(model: model)
             .onAppear {
-                model.openSettingsWindow = { [openWindow] in
+                model.registerSettingsWindowOpener { [openWindow] in
                     openWindow(id: "settings")
                 }
             }
