@@ -1,5 +1,17 @@
 import Foundation
 
+public struct GeminiHookInstallerManifest: Equatable, Codable, Sendable {
+    public static let fileName = "open-island-gemini-hooks-install.json"
+
+    public var hookCommand: String
+    public var installedAt: Date
+
+    public init(hookCommand: String, installedAt: Date = .now) {
+        self.hookCommand = hookCommand
+        self.installedAt = installedAt
+    }
+}
+
 public struct GeminiHookFileMutation: Equatable, Sendable {
     public var contents: Data?
     public var changed: Bool
@@ -16,79 +28,144 @@ public enum GeminiHookInstallerError: Error, LocalizedError {
     case invalidSettingsJSON
 
     public var errorDescription: String? {
-        "The existing Gemini settings.json is not valid JSON."
+        switch self {
+        case .invalidSettingsJSON:
+            "The existing Gemini settings.json is not valid JSON."
+        }
     }
 }
 
 public enum GeminiHookInstaller {
-    private static let hookEvents: [String] = ["SessionStart", "PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit"]
+    private static let eventSpecs: [(name: String, matcher: String?)] = [
+        ("SessionStart", "*"),
+        ("SessionEnd", "*"),
+        ("BeforeAgent", "*"),
+        ("AfterAgent", "*"),
+        ("Notification", "*"),
+    ]
 
     public static func hookCommand(for binaryPath: String) -> String {
-        "'\(binaryPath.replacingOccurrences(of: "'", with: "'\\''"))' --source gemini"
+        "\(shellQuote(binaryPath)) --source gemini"
     }
 
     public static func installSettingsJSON(
         existingData: Data?,
         hookCommand: String
     ) throws -> GeminiHookFileMutation {
-        var root = try loadRoot(from: existingData)
-        var hooks = root["hooks"] as? [String: Any] ?? [:]
-        var changed = false
+        var rootObject = try loadRootObject(from: existingData)
+        var hooksObject = rootObject["hooks"] as? [String: Any] ?? [:]
 
-        for event in hookEvents {
-            var entries = hooks[event] as? [[String: Any]] ?? []
-            let alreadyPresent = entries.contains { ($0["command"] as? String)?.contains("--source gemini") == true }
-            if !alreadyPresent {
-                entries.append(["command": hookCommand])
-                hooks[event] = entries
-                changed = true
-            }
+        for spec in eventSpecs {
+            var groups = hooksObject[spec.name] as? [[String: Any]] ?? []
+            groups = groups.filter { !isManagedGroup($0, managedCommand: hookCommand) }
+            groups.append(managedGroup(matcher: spec.matcher, hookCommand: hookCommand))
+            hooksObject[spec.name] = groups
         }
 
-        root["hooks"] = hooks
-        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-        return GeminiHookFileMutation(contents: data, changed: changed, managedHooksPresent: true)
+        rootObject["hooks"] = hooksObject
+        let data = try serialize(rootObject)
+        return GeminiHookFileMutation(
+            contents: data,
+            changed: data != existingData,
+            managedHooksPresent: true
+        )
     }
 
     public static func uninstallSettingsJSON(
         existingData: Data?,
-        hookCommand: String
+        managedCommand: String?
     ) throws -> GeminiHookFileMutation {
         guard let existingData else {
             return GeminiHookFileMutation(contents: nil, changed: false, managedHooksPresent: false)
         }
-        var root = try loadRoot(from: existingData)
-        guard var hooks = root["hooks"] as? [String: Any] else {
-            return GeminiHookFileMutation(contents: existingData, changed: false, managedHooksPresent: false)
-        }
 
-        var changed = false
-        for event in hookEvents {
-            if var entries = hooks[event] as? [[String: Any]] {
-                let before = entries.count
-                entries.removeAll { ($0["command"] as? String)?.contains("--source gemini") == true }
-                if entries.count != before {
-                    hooks[event] = entries.isEmpty ? nil : entries
-                    changed = true
-                }
+        var rootObject = try loadRootObject(from: existingData)
+        var hooksObject = rootObject["hooks"] as? [String: Any] ?? [:]
+        var mutated = false
+
+        for spec in eventSpecs {
+            let groups = hooksObject[spec.name] as? [[String: Any]] ?? []
+            let filtered = groups.filter { !isManagedGroup($0, managedCommand: managedCommand) }
+            if filtered.count != groups.count {
+                mutated = true
+            }
+
+            if filtered.isEmpty {
+                hooksObject.removeValue(forKey: spec.name)
+            } else {
+                hooksObject[spec.name] = filtered
             }
         }
 
-        root["hooks"] = hooks
-        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-        let stillPresent = hookEvents.contains { event in
-            (hooks[event] as? [[String: Any]])?.contains {
-                ($0["command"] as? String)?.contains("--source gemini") == true
-            } == true
+        if hooksObject.isEmpty {
+            rootObject.removeValue(forKey: "hooks")
+        } else {
+            rootObject["hooks"] = hooksObject
         }
-        return GeminiHookFileMutation(contents: data, changed: changed, managedHooksPresent: stillPresent)
+
+        let contents = rootObject.isEmpty ? nil : try serialize(rootObject)
+        return GeminiHookFileMutation(
+            contents: contents,
+            changed: mutated || contents != existingData,
+            managedHooksPresent: mutated
+        )
     }
 
-    private static func loadRoot(from data: Data?) throws -> [String: Any] {
-        guard let data, !data.isEmpty else { return [:] }
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+    private static func loadRootObject(from data: Data?) throws -> [String: Any] {
+        guard let data else { return [:] }
+
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard let rootObject = object as? [String: Any] else {
             throw GeminiHookInstallerError.invalidSettingsJSON
         }
-        return root
+
+        return rootObject
+    }
+
+    private static func serialize(_ object: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
+
+    private static func managedGroup(matcher: String?, hookCommand: String) -> [String: Any] {
+        let hook: [String: Any] = [
+            "type": "command",
+            "command": hookCommand,
+            "name": "Open Island"
+        ]
+
+        var group: [String: Any] = [
+            "hooks": [hook]
+        ]
+
+        if let matcher {
+            group["matcher"] = matcher
+        }
+
+        return group
+    }
+
+    private static func isManagedGroup(_ group: [String: Any], managedCommand: String?) -> Bool {
+        guard let hooks = group["hooks"] as? [[String: Any]] else {
+            return false
+        }
+
+        return hooks.contains { hook in
+            guard let command = hook["command"] as? String else { return false }
+            if let managedCommand, command == managedCommand {
+                return true
+            }
+            return isOpenIslandGeminiHookCommand(command)
+        }
+    }
+
+    private static func isOpenIslandGeminiHookCommand(_ command: String) -> Bool {
+        let normalized = command.lowercased()
+        return (normalized.contains("openislandhooks") || normalized.contains("vibeislandhooks"))
+            && normalized.contains("gemini")
+    }
+
+    private static func shellQuote(_ string: String) -> String {
+        guard !string.isEmpty else { return "''" }
+        return "'\(string.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

@@ -126,8 +126,7 @@ final class HookInstallationCoordinator {
     }
 
     var geminiHooksInstalled: Bool {
-        if case .installed = geminiHookStatus { return true }
-        return false
+        geminiHookStatus?.managedHooksPresent == true
     }
 
     var claudeUsageInstalled: Bool {
@@ -319,32 +318,20 @@ final class HookInstallationCoordinator {
     }
 
     var geminiHookStatusTitle: String {
-        switch geminiHookStatus {
-        case nil:
-            return "Gemini hooks loading"
-        case .geminiNotFound:
-            return "Gemini CLI not found"
-        case .notInstalled:
-            return "Gemini hooks not installed"
-        case .installed:
-            return "Gemini hooks installed"
-        }
+        guard let status = geminiHookStatus else { return "Gemini hooks loading" }
+        return status.managedHooksPresent ? "Gemini hooks installed" : "Gemini hooks not installed"
     }
 
     var geminiHookStatusSummary: String {
-        switch geminiHookStatus {
-        case nil:
+        guard let status = geminiHookStatus else {
             return "Reading ~/.gemini/settings.json."
-        case .geminiNotFound:
-            return "Install Gemini CLI to enable hooks."
-        case .notInstalled:
-            if hooksBinaryURL == nil {
-                return "Build OpenIslandHooks before installing."
-            }
-            return "no managed Gemini hooks"
-        case .installed:
-            return "managed hooks present"
         }
+
+        if hooksBinaryURL == nil {
+            return "Build OpenIslandHooks before installing."
+        }
+
+        return status.managedHooksPresent ? "managed hooks present" : "no managed Gemini hooks"
     }
 
     var codexHookStatusTitle: String {
@@ -894,13 +881,8 @@ final class HookInstallationCoordinator {
     }
 
     func uninstallGeminiHooks() {
-        guard let hooksBinaryURL else {
-            onStatusMessage?("Could not find a local OpenIslandHooks binary. Build the package first.")
-            return
-        }
-
         updateGeminiHooks(userMessage: "Removing Gemini hooks.") { manager in
-            try manager.uninstall(hooksBinaryURL: hooksBinaryURL)
+            try manager.uninstall()
         }
     }
 
@@ -1063,7 +1045,7 @@ final class HookInstallationCoordinator {
             do {
                 let status = try operation(self.geminiHookInstallationManager)
                 self.geminiHookStatus = status
-                if case .installed = status {
+                if status.managedHooksPresent {
                     self.onStatusMessage?("Gemini hooks are installed and ready.")
                 } else {
                     self.onStatusMessage?("Gemini hooks are not installed.")

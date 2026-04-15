@@ -23,30 +23,27 @@ private struct AutoHeightScrollView<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @State private var contentHeight: CGFloat = 0
 
-    var body: some View {
-        if contentHeight > maxHeight {
-            // Exceeds max → fixed height, scrollable
-            ScrollView(.vertical) {
-                measuredContent
-            }
-            .scrollIndicators(.hidden)
-            .frame(height: maxHeight)
-        } else {
-            // Fits within max → direct render, auto-height
-            measuredContent
-        }
-    }
+    private var isScrollable: Bool { contentHeight > maxHeight }
 
-    private var measuredContent: some View {
-        content()
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
+    var body: some View {
+        // Always use ScrollView so the content gets unconstrained vertical
+        // space for measurement.  Without this, a tight parent window can
+        // cap the GeometryReader measurement, making long content appear
+        // truncated instead of scrollable.
+        ScrollView(.vertical) {
+            content()
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
+                    }
+                )
+                .onPreferenceChange(ContentHeightKey.self) { height in
+                    if height > 0 { contentHeight = height }
                 }
-            )
-            .onPreferenceChange(ContentHeightKey.self) { height in
-                if height > 0 { contentHeight = height }
-            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(isScrollable ? .automatic : .hidden)
+        .frame(height: contentHeight > 0 ? min(contentHeight, maxHeight) : nil)
     }
 }
 
@@ -180,9 +177,9 @@ struct IslandPanelView: View {
     private var expansionWidth: CGFloat {
         guard !showsIdleEdgeWhenCollapsed else { return 0 }
         guard hasClosedPresence else { return 0 }
-        let leftWidth = sideWidth + 8 + (closedSpotlightSession?.phase.requiresAttention == true ? 18 : 0)
-        let rightWidth = max(sideWidth, countBadgeWidth)
         let hasPending = closedSpotlightSession?.phase.requiresAttention == true
+        let leftWidth = sideWidth + 8 + (hasPending ? 18 : 0)
+        let rightWidth = max(sideWidth, countBadgeWidth) + (hasPending ? 18 : 0)
         return leftWidth + rightWidth + 16 + (hasPending ? 6 : 0)
     }
 
@@ -380,12 +377,13 @@ struct IslandPanelView: View {
                 }
 
                 if hasClosedPresence {
+                    let attentionBalanceWidth: CGFloat = closedSpotlightSession?.phase.requiresAttention == true ? 18 : 0
                     ClosedCountBadge(
                         liveCount: model.liveSessionCount,
                         tint: closedSpotlightSession?.phase.requiresAttention == true ? .orange : scoutTint
                     )
                     .matchedGeometryEffect(id: "right-indicator", in: notchNamespace, isSource: true)
-                    .frame(width: max(sideWidth, countBadgeWidth))
+                    .frame(width: max(sideWidth, countBadgeWidth) + attentionBalanceWidth)
                 }
             }
             .frame(height: closedNotchHeight)
@@ -539,10 +537,14 @@ struct IslandPanelView: View {
                         }
                     }
             } else {
-                // List mode: auto-height (fits content, scrolls only when exceeding max)
-                AutoHeightScrollView(maxHeight: Self.maxSessionListHeight) {
+                // List mode: scroll when content exceeds the panel's available space.
+                // The parent frame constraint (currentHeight - closedNotchHeight - 12)
+                // determines the viewport; ScrollView handles overflow naturally.
+                ScrollView(.vertical) {
                     sessionListContent(context: context)
                 }
+                .scrollIndicators(.hidden)
+                .scrollBounceBehavior(.basedOnSize)
                 .padding(.vertical, 2)
             }
         }
@@ -561,6 +563,8 @@ struct IslandPanelView: View {
                     lang: model.lang,
                     onApprove: { model.approvePermission(for: session.id, action: $0) },
                     onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
+                    onReply: TerminalTextSender.canReply(to: session, enabled: model.completionReplyEnabled)
+                        ? { model.replyToSession(session, text: $0) } : nil,
                     onJump: { model.jumpToSession(session) }
                 )
 
@@ -588,6 +592,8 @@ struct IslandPanelView: View {
                         lang: model.lang,
                         onApprove: { model.approvePermission(for: session.id, action: $0) },
                         onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
+                        onReply: TerminalTextSender.canReply(to: session, enabled: model.completionReplyEnabled)
+                            ? { model.replyToSession(session, text: $0) } : nil,
                         onJump: { model.jumpToSession(session) },
                         onDismiss: session.isRemote ? { model.dismissSession(session.id) } : nil
                     )
@@ -679,7 +685,8 @@ struct IslandPanelView: View {
             }
         }
 
-        if let snapshot = model.codexUsageSnapshot,
+        if model.showCodexUsage,
+           let snapshot = model.codexUsageSnapshot,
            snapshot.isEmpty == false {
             let windows = snapshot.windows.map { window in
                 UsageWindowPresentation(
@@ -1014,11 +1021,13 @@ private struct IslandSessionRow: View {
     var lang: LanguageManager = .shared
     var onApprove: ((ApprovalAction) -> Void)?
     var onAnswer: ((QuestionPromptResponse) -> Void)?
+    var onReply: ((String) -> Void)?
     let onJump: () -> Void
     var onDismiss: (() -> Void)?
 
     @State private var isHighlighted = false
     @State private var isManuallyExpanded = false
+    @State private var replyText: String = ""
 
     var body: some View {
         rowBody(referenceDate: referenceDate)
@@ -1319,6 +1328,14 @@ private struct IslandSessionRow: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
             }
+
+            if onReply != nil {
+                Rectangle()
+                    .fill(.white.opacity(0.04))
+                    .frame(height: 1)
+
+                completionReplyInput
+            }
         }
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1328,6 +1345,38 @@ private struct IslandSessionRow: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(.white.opacity(0.08))
         )
+    }
+
+    @ViewBuilder
+    private var completionReplyInput: some View {
+        HStack(spacing: 8) {
+            ReplyTextField(
+                placeholder: lang.t("completion.replyPlaceholder"),
+                text: $replyText,
+                onSubmit: { submitReply() }
+            )
+            .frame(height: 32)
+
+            Button {
+                submitReply()
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(replyText.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? .white.opacity(0.2) : .white.opacity(0.9))
+            }
+            .buttonStyle(.plain)
+            .disabled(replyText.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func submitReply() {
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        replyText = ""
+        onReply?(text)
     }
 
     // MARK: - Actionable helpers
@@ -1340,7 +1389,7 @@ private struct IslandSessionRow: View {
     }
 
     private var completionMessageText: String {
-        if let text = session.lastAssistantMessageText?.trimmedForNotificationCard, !text.isEmpty {
+        if let text = session.completionAssistantMessageText?.trimmedForNotificationCard, !text.isEmpty {
             return text
         }
         return session.summary
@@ -1629,6 +1678,74 @@ private struct StructuredQuestionPromptView: View {
         }
 
         selections[question.question] = selected
+    }
+}
+
+// MARK: - Reply TextField (NSTextField wrapper for IME-safe Enter handling)
+
+/// NSTextField wrapper that fires `onSubmit` only when the IME composition
+/// is finished — pressing Enter during Chinese/Japanese IME composition
+/// confirms the candidate instead of submitting.
+private struct ReplyTextField: NSViewRepresentable {
+    var placeholder: String
+    @Binding var text: String
+    var onSubmit: () -> Void
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 13)
+        field.textColor = .white
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [
+                .foregroundColor: NSColor.white.withAlphaComponent(0.35),
+                .font: NSFont.systemFont(ofSize: 13),
+            ]
+        )
+        field.delegate = context.coordinator
+        field.cell?.lineBreakMode = .byTruncatingTail
+        field.cell?.usesSingleLineMode = true
+        return field
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        context.coordinator.onSubmit = onSubmit
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onSubmit: onSubmit)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        var onSubmit: () -> Void
+
+        init(text: Binding<String>, onSubmit: @escaping () -> Void) {
+            self.text = text
+            self.onSubmit = onSubmit
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                // Let AppKit handle Enter during IME composition (e.g. confirming
+                // a Chinese/Japanese candidate). Only submit when no marked text.
+                guard !textView.hasMarkedText() else { return false }
+                onSubmit()
+                return true
+            }
+            return false
+        }
     }
 }
 

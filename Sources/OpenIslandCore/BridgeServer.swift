@@ -1222,21 +1222,25 @@ public final class BridgeServer: @unchecked Sendable {
                         title: payload.sessionTitle,
                         tool: .geminiCLI,
                         origin: .live,
-                        initialPhase: .running,
-                        summary: payload.implicitStartSummary,
-                        timestamp: .now
+                        initialPhase: .completed,
+                        summary: payload.implicitSummary,
+                        timestamp: .now,
+                        jumpTarget: payload.defaultJumpTarget,
+                        geminiMetadata: payload.defaultGeminiMetadata.isEmpty ? nil : payload.defaultGeminiMetadata
                     )
                 )
             )
             send(.response(.acknowledged), to: clientID)
 
-        case .userPromptSubmit:
+        case .beforeAgent:
             ensureGeminiSessionExists(for: payload)
+            synchronizeGeminiJumpTarget(for: payload)
+            synchronizeGeminiMetadata(for: payload)
             emit(
                 .activityUpdated(
                     SessionActivityUpdated(
                         sessionID: payload.sessionID,
-                        summary: payload.implicitStartSummary,
+                        summary: payload.implicitSummary,
                         phase: .running,
                         timestamp: .now
                     )
@@ -1244,47 +1248,55 @@ public final class BridgeServer: @unchecked Sendable {
             )
             send(.response(.acknowledged), to: clientID)
 
-        case .preToolUse:
+        case .afterAgent:
             ensureGeminiSessionExists(for: payload)
-            emit(
-                .activityUpdated(
-                    SessionActivityUpdated(
-                        sessionID: payload.sessionID,
-                        summary: payload.implicitStartSummary,
-                        phase: .running,
-                        timestamp: .now
-                    )
-                )
-            )
-            send(.response(.acknowledged), to: clientID)
-
-        case .postToolUse:
-            ensureGeminiSessionExists(for: payload)
-            emit(
-                .activityUpdated(
-                    SessionActivityUpdated(
-                        sessionID: payload.sessionID,
-                        summary: payload.implicitStartSummary,
-                        phase: .running,
-                        timestamp: .now
-                    )
-                )
-            )
-            send(.response(.acknowledged), to: clientID)
-
-        case .stop:
-            ensureGeminiSessionExists(for: payload)
-            let summary = payload.lastAssistantMessage.flatMap { $0.isEmpty ? nil : String($0.prefix(120)) }
-                ?? payload.implicitStartSummary
+            synchronizeGeminiJumpTarget(for: payload)
+            synchronizeGeminiMetadata(for: payload)
             emit(
                 .sessionCompleted(
                     SessionCompleted(
                         sessionID: payload.sessionID,
-                        summary: summary,
+                        summary: payload.implicitSummary,
                         timestamp: .now
                     )
                 )
             )
+            send(.response(.acknowledged), to: clientID)
+
+        case .sessionEnd:
+            ensureGeminiSessionExists(for: payload)
+            synchronizeGeminiJumpTarget(for: payload)
+            synchronizeGeminiMetadata(for: payload)
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: payload.reason.map { "Gemini CLI session ended: \($0)." } ?? payload.implicitSummary,
+                        timestamp: .now,
+                        isInterrupt: true,
+                        isSessionEnd: true
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .notification:
+            ensureGeminiSessionExists(for: payload)
+            synchronizeGeminiJumpTarget(for: payload)
+            synchronizeGeminiMetadata(for: payload)
+
+            let currentPhase = localState.session(id: payload.sessionID)?.phase ?? .completed
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.notificationSummary,
+                        phase: currentPhase,
+                        timestamp: .now
+                    )
+                )
+            )
+
             send(.response(.acknowledged), to: clientID)
         }
     }
@@ -1301,8 +1313,67 @@ public final class BridgeServer: @unchecked Sendable {
                     title: payload.sessionTitle,
                     tool: .geminiCLI,
                     origin: .live,
-                    initialPhase: .running,
-                    summary: payload.implicitStartSummary,
+                    initialPhase: .completed,
+                    summary: payload.hookEventName == .notification ? payload.notificationSummary : payload.implicitSummary,
+                    timestamp: .now,
+                    jumpTarget: payload.defaultJumpTarget,
+                    geminiMetadata: payload.defaultGeminiMetadata.isEmpty ? nil : payload.defaultGeminiMetadata
+                )
+            )
+        )
+    }
+
+    private func synchronizeGeminiJumpTarget(for payload: GeminiHookPayload) {
+        guard let existingSession = localState.session(id: payload.sessionID) else {
+            return
+        }
+
+        let jumpTarget = Self.mergeJumpTargetPreservingExistingResolvedFields(
+            incoming: payload.defaultJumpTarget,
+            existing: existingSession.jumpTarget
+        )
+
+        guard existingSession.jumpTarget != jumpTarget else {
+            return
+        }
+
+        emit(
+            .jumpTargetUpdated(
+                JumpTargetUpdated(
+                    sessionID: payload.sessionID,
+                    jumpTarget: jumpTarget,
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    private func synchronizeGeminiMetadata(for payload: GeminiHookPayload) {
+        guard let existingSession = localState.session(id: payload.sessionID) else {
+            return
+        }
+
+        let update = payload.defaultGeminiMetadata
+        let merged = GeminiSessionMetadata(
+            transcriptPath: update.transcriptPath ?? existingSession.geminiMetadata?.transcriptPath,
+            initialUserPrompt: existingSession.geminiMetadata?.initialUserPrompt ?? update.initialUserPrompt ?? update.lastUserPrompt,
+            lastUserPrompt: update.lastUserPrompt ?? existingSession.geminiMetadata?.lastUserPrompt,
+            lastAssistantMessage: update.lastAssistantMessage ?? existingSession.geminiMetadata?.lastAssistantMessage,
+            lastAssistantMessageBody: update.lastAssistantMessageBody ?? existingSession.geminiMetadata?.lastAssistantMessageBody
+        )
+        guard !merged.isEmpty else {
+            return
+        }
+
+        guard existingSession.geminiMetadata != merged else {
+            return
+        }
+
+        emit(
+            .geminiSessionMetadataUpdated(
+                GeminiSessionMetadataUpdated(
+                    sessionID: payload.sessionID,
+                    geminiMetadata: merged,
                     timestamp: .now
                 )
             )

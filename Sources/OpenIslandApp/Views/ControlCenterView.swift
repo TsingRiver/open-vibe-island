@@ -152,37 +152,39 @@ struct ControlCenterView: View {
                     }
                 }
 
-                usageDebugCard(
-                    title: "Codex Usage",
-                    statusTitle: model.codexUsageStatusTitle,
-                    statusSummary: model.codexUsageStatusSummary,
-                    isActive: model.codexUsageSnapshot?.isEmpty == false,
-                    accentColor: model.codexUsageSnapshot?.isEmpty == false ? .mint : .blue
-                ) {
-                    if let summary = model.codexUsageSummaryText {
-                        metadataRow(title: "usage", value: summary)
-                    }
-
-                    if let snapshot = model.codexUsageSnapshot {
-                        metadataRow(title: "latest rollout", value: snapshot.sourceFilePath)
-
-                        if let planType = snapshot.planType {
-                            metadataRow(title: "plan", value: planType)
+                if model.showCodexUsage {
+                    usageDebugCard(
+                        title: "Codex Usage",
+                        statusTitle: model.codexUsageStatusTitle,
+                        statusSummary: model.codexUsageStatusSummary,
+                        isActive: model.codexUsageSnapshot?.isEmpty == false,
+                        accentColor: model.codexUsageSnapshot?.isEmpty == false ? .mint : .blue
+                    ) {
+                        if let summary = model.codexUsageSummaryText {
+                            metadataRow(title: "usage", value: summary)
                         }
 
-                        if let capturedAt = snapshot.capturedAt {
-                            metadataRow(
-                                title: "captured",
-                                value: capturedAt.formatted(date: .abbreviated, time: .standard)
-                            )
+                        if let snapshot = model.codexUsageSnapshot {
+                            metadataRow(title: "latest rollout", value: snapshot.sourceFilePath)
+
+                            if let planType = snapshot.planType {
+                                metadataRow(title: "plan", value: planType)
+                            }
+
+                            if let capturedAt = snapshot.capturedAt {
+                                metadataRow(
+                                    title: "captured",
+                                    value: capturedAt.formatted(date: .abbreviated, time: .standard)
+                                )
+                            }
                         }
-                    }
-                } actions: {
-                    HStack(spacing: 10) {
-                        Button(lang.t("debug.refresh")) {
-                            model.refreshCodexUsageState()
+                    } actions: {
+                        HStack(spacing: 10) {
+                            Button(lang.t("debug.refresh")) {
+                                model.refreshCodexUsageState()
+                            }
+                            .buttonStyle(DebugActionButtonStyle(kind: .secondary))
                         }
-                        .buttonStyle(DebugActionButtonStyle(kind: .secondary))
                     }
                 }
 
@@ -275,7 +277,7 @@ struct ControlCenterView: View {
                     }
                 }
                 .buttonStyle(DebugActionButtonStyle(kind: .primary))
-                .disabled(model.isGeminiHookSetupBusy || model.hooksBinaryURL == nil || model.geminiHookStatus == .geminiNotFound)
+                .disabled(model.isGeminiHookSetupBusy || model.hooksBinaryURL == nil)
             }
         }
     }

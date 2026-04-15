@@ -18,6 +18,8 @@ final class AppModel {
     private static let islandHideIdleToEdgeDefaultsKey = "appearance.island.hideIdleToEdge"
     private static let islandPixelShapeStyleDefaultsKey = "appearance.island.pixelShapeStyle"
     private static let islandStatusColorsDefaultsKey = "appearance.island.statusColors"
+    private static let showCodexUsageDefaultsKey = "app.showCodexUsage"
+    private static let completionReplyEnabledDefaultsKey = "feature.completionReply.enabled"
 
     static let defaultStatusColors: [SessionPhase: String] = [
         .running: "#6E9FFF",
@@ -108,6 +110,7 @@ final class AppModel {
     var codexHealthReport: HookHealthReport? { hooks.codexHealthReport }
     var cursorHooksInstalled: Bool { hooks.cursorHooksInstalled }
     var isCursorHookSetupBusy: Bool { hooks.isCursorHookSetupBusy }
+    var cursorHookStatus: CursorHookInstallationStatus? { hooks.cursorHookStatus }
     var cursorHookStatusTitle: String { hooks.cursorHookStatusTitle }
     var cursorHookStatusSummary: String { hooks.cursorHookStatusSummary }
     var geminiHooksInstalled: Bool { hooks.geminiHooksInstalled }
@@ -194,6 +197,19 @@ final class AppModel {
         didSet {
             guard hasFinishedInit, hapticFeedbackEnabled != oldValue else { return }
             UserDefaults.standard.set(hapticFeedbackEnabled, forKey: Self.hapticFeedbackEnabledDefaultsKey)
+        }
+    }
+    var showCodexUsage: Bool = false {
+        didSet {
+            guard hasFinishedInit, showCodexUsage != oldValue else { return }
+            UserDefaults.standard.set(showCodexUsage, forKey: Self.showCodexUsageDefaultsKey)
+        }
+    }
+    var completionReplyEnabled: Bool = false {
+        didSet {
+            guard hasFinishedInit, completionReplyEnabled != oldValue else { return }
+            UserDefaults.standard.set(completionReplyEnabled, forKey: Self.completionReplyEnabledDefaultsKey)
+            refreshOverlayPlacementIfVisible()
         }
     }
     var isSoundMuted = false {
@@ -419,11 +435,20 @@ final class AppModel {
         UserDefaults.standard.register(defaults: [
             Self.showDockIconDefaultsKey: true,
             Self.hapticFeedbackEnabledDefaultsKey: false,
+            Self.completionReplyEnabledDefaultsKey: false,
         ])
         isSoundMuted = UserDefaults.standard.bool(forKey: Self.soundMutedDefaultsKey)
         selectedSoundName = NotificationSoundService.selectedSoundName
         showDockIcon = UserDefaults.standard.bool(forKey: Self.showDockIconDefaultsKey)
         hapticFeedbackEnabled = UserDefaults.standard.bool(forKey: Self.hapticFeedbackEnabledDefaultsKey)
+        if UserDefaults.standard.object(forKey: Self.showCodexUsageDefaultsKey) != nil {
+            showCodexUsage = UserDefaults.standard.bool(forKey: Self.showCodexUsageDefaultsKey)
+        } else {
+            showCodexUsage = FileManager.default.fileExists(
+                atPath: CodexRolloutDiscovery.defaultRootURL.path
+            )
+        }
+        completionReplyEnabled = UserDefaults.standard.bool(forKey: Self.completionReplyEnabledDefaultsKey)
         islandAppearanceMode = IslandAppearanceMode(
             rawValue: UserDefaults.standard.string(forKey: Self.islandAppearanceModeDefaultsKey) ?? ""
         ) ?? .default
@@ -684,8 +709,10 @@ final class AppModel {
             hooks.refreshCursorHookStatus()
             hooks.refreshClaudeUsageState()
             hooks.startClaudeUsageMonitoringIfNeeded()
-            hooks.refreshCodexUsageState()
-            hooks.startCodexUsageMonitoringIfNeeded()
+            if showCodexUsage {
+                hooks.refreshCodexUsageState()
+                hooks.startCodexUsageMonitoringIfNeeded()
+            }
             updateChecker.startIfNeeded()
 
         } else {
@@ -1040,6 +1067,24 @@ final class AppModel {
         )
     }
 
+    func replyToSession(_ session: AgentSession, text: String) {
+        dismissNotificationSurfaceIfPresent(for: session.id)
+        synchronizeSelection()
+        refreshOverlayPlacementIfVisible()
+
+        lastActionMessage = "Sending reply to \(session.title)…"
+
+        Task { [weak self] in
+            let success = await Task.detached(priority: .userInitiated) {
+                TerminalTextSender.send(text, to: session)
+            }.value
+
+            self?.lastActionMessage = success
+                ? "Sent reply to \(session.title)."
+                : "Failed to send reply to \(session.title)."
+        }
+    }
+
 
     private func send(_ command: BridgeCommand, userMessage: String) {
         lastActionMessage = userMessage
@@ -1115,6 +1160,7 @@ final class AppModel {
                 case let .jumpTargetUpdated(p): return p.sessionID
                 case let .sessionMetadataUpdated(p): return p.sessionID
                 case let .claudeSessionMetadataUpdated(p): return p.sessionID
+                case let .geminiSessionMetadataUpdated(p): return p.sessionID
                 case let .openCodeSessionMetadataUpdated(p): return p.sessionID
                 case let .cursorSessionMetadataUpdated(p): return p.sessionID
                 case let .actionableStateResolved(p): return p.sessionID
@@ -1177,6 +1223,7 @@ final class AppModel {
                 if !self.codebuddyHooksInstalled { self.installCodebuddyHooks() }
                 if !self.openCodePluginInstalled { self.installOpenCodePlugin() }
                 if !self.cursorHooksInstalled { self.installCursorHooks() }
+                if !self.geminiHooksInstalled { self.installGeminiHooks() }
                 if !self.claudeUsageInstalled { self.installClaudeUsageBridge() }
 
                 // Run health checks after install to detect stale paths, conflicts, etc.
@@ -1314,6 +1361,8 @@ final class AppModel {
             }
 
             return payload.claudeMetadata.lastAssistantMessage ?? "Claude session metadata updated."
+        case let .geminiSessionMetadataUpdated(payload):
+            return payload.geminiMetadata.lastAssistantMessage ?? "Gemini session metadata updated."
         case let .openCodeSessionMetadataUpdated(payload):
             if let currentTool = payload.openCodeMetadata.currentTool {
                 return "OpenCode is running \(currentTool)."

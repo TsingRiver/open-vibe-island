@@ -111,6 +111,23 @@ struct ActiveAgentProcessDiscovery {
                     workingDirectory: nil,
                     terminalTTY: process.terminalTTY
                 ))
+                continue
+            }
+
+            if isGeminiProcess(command: process.command) {
+                let claimKey = "gemini:\(process.pid)"
+                guard claimedKeys.insert(claimKey).inserted else {
+                    continue
+                }
+
+                let lsofOutput = lsofOutput(pid: process.pid)
+                snapshots.append(ProcessSnapshot(
+                    tool: .geminiCLI,
+                    sessionID: nil,
+                    workingDirectory: lsofOutput.flatMap(workingDirectory(from:)),
+                    terminalTTY: process.terminalTTY,
+                    terminalApp: terminalApp(for: process, processesByPID: processesByPID)
+                ))
             }
         }
 
@@ -539,6 +556,19 @@ struct ActiveAgentProcessDiscovery {
         let lowered = command.lowercased()
         return lowered.contains("/opencode-ai/") || lowered.contains("/opencode")
             || lowered.contains("/.opencode")
+    }
+
+    private func isGeminiProcess(command: String) -> Bool {
+        let lowered = command.lowercased()
+        guard let firstToken = lowered.split(separator: " ").first.map(String.init) else {
+            return false
+        }
+
+        return firstToken == "gemini"
+            || firstToken.hasSuffix("/gemini")
+            || lowered.contains("/bin/gemini")
+            || lowered.contains("/google/gemini-cli")
+            || lowered.contains("/@google/gemini-cli")
     }
 
     private func isClaudeProcess(command: String) -> Bool {

@@ -89,14 +89,11 @@ struct OpenIslandHooksCLI {
                     FileHandle.standardOutput.write(Data("\n".utf8))
                 }
             case .gemini:
-                let payload = try decoder.decode(GeminiHookPayload.self, from: input)
-                guard let response = try? client.send(.processGeminiHook(payload)) else {
-                    logStderr("bridge unavailable for gemini hook (\(payload.hookEventName.rawValue))")
-                    return
-                }
-                if let output = GeminiHookOutputEncoder.standardOutput(for: response) {
-                    FileHandle.standardOutput.write(output)
-                }
+                let payload = try decoder
+                    .decode(GeminiHookPayload.self, from: input)
+                    .withRuntimeContext(environment: ProcessInfo.processInfo.environment)
+
+                _ = try? client.send(.processGeminiHook(payload), timeout: 45)
             }
         } catch {
             // Hooks should fail open so the CLI continues working even if the bridge is unavailable.

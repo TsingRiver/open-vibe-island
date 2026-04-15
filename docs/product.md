@@ -29,7 +29,7 @@ CLI coding agents are powerful, but they pull attention away from the editor and
 | **Qwen Code** | Supported | Claude Code fork — same hook format, config at `~/.qwen/settings.json` |
 | **Factory** | Supported | Claude Code fork — same hook format, config at `~/.factory/settings.json` |
 | **CodeBuddy** | Supported | Claude Code fork — same hook format, config at `~/.codebuddy/settings.json` |
-| **Gemini CLI** | Planned | — |
+| **Gemini CLI** | Supported | Hook integration (`SessionStart`, `BeforeAgent`, `AfterAgent`, `SessionEnd`, `Notification`), session tracking, terminal jump metadata, completion-card compatibility handling |
 
 ## Supported Terminals
 
@@ -66,6 +66,6 @@ CLI coding agents are powerful, but they pull attention away from the editor and
 
 ## Future Directions
 
-- Gemini CLI and Warp support
+- Warp precision jump support
 - Sound packs, themes, and onboarding polish
 - Deeper terminal split targeting

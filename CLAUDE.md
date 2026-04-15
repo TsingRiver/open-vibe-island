@@ -88,7 +88,7 @@ Open `Package.swift` in Xcode for the app target. Requires macOS 14+, Swift 6.2.
 
 - **Bilingual required**: Every release MUST include both English and Chinese (Simplified) descriptions. Use the template in `.github/RELEASE_TEMPLATE.md`.
 - Before creating a release, fetch remote `main` and review ALL merged PRs since the last tag to avoid missing changes.
-- Each changelog entry follows the format: `- **Category**: English description (#PR)\n  中文描述 (#PR)`
+- Each changelog entry follows the format: `- **Category**: English description (#PR)\n  中文描述 (#PR)`. For external contributors, append `— Thanks @username` to the English line.
 - The release title follows: `Open Island vX.Y.Z — Short English Title`
 - The Installation section must be bilingual.
 - Release is triggered by pushing a `v*` tag to `main`. The GitHub Actions workflow builds, signs, notarizes, and publishes the DMG automatically.

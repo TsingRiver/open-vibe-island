@@ -357,7 +357,10 @@ final class TerminalJumpServiceTests: XCTestCase {
             openAction: { arguments in
                 openedArguments.values.append(arguments)
             },
-            appleScriptRunner: { _ in "" }
+            appleScriptRunner: { _ in "" },
+            // Keep this unit test independent from a locally installed `trae`
+            // command so it only verifies the app-activation fallback branch.
+            processRunner: { _, _ in false }
         )
 
         let result = try service.jump(

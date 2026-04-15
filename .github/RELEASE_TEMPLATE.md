@@ -5,8 +5,10 @@ Brief English summary of this release.
 
 ### Changes since vPREV | 自 vPREV 以来的变更
 
-- **Category**: English description (#PR)
+- **Category**: English description (#PR) — Thanks @contributor
   中文描述 (#PR)
+
+> Add `— Thanks @contributor` to entries from external contributors.
 
 ### Contributors | 贡献者
 
