@@ -434,13 +434,30 @@ final class OverlayPanelController {
             && point.y <= rect.maxY
     }
 
+    /// Computes the visible collapsed surface width used by both positioning
+    /// and hit testing.
+    /// - Parameters:
+    ///   - notchWidth: Physical notch width, or the fallback top-bar width on
+    ///     non-notch displays.
+    ///   - notchHeight: Physical notch height, or the fallback menu-bar height
+    ///     on non-notch displays.
+    ///   - liveSessionCount: Number of visible live sessions used for the count
+    ///     badge width.
+    ///   - hasAttention: Whether the spotlight session needs approval or an
+    ///     answer, which adds the attention indicator lanes.
+    ///   - notchStatus: Current transition state; popping adds transient width.
+    ///   - showsIdleEdgeWhenCollapsed: Whether the collapsed island is reduced
+    ///     to the thin idle edge.
+    ///   - usesDetailedClosedDisplay: Whether custom Detailed style text lanes
+    ///     should be included around the center notch.
     nonisolated static func closedPanelWidth(
         notchWidth: CGFloat,
         notchHeight: CGFloat,
         liveSessionCount: Int,
         hasAttention: Bool,
         notchStatus: NotchStatus,
-        showsIdleEdgeWhenCollapsed: Bool
+        showsIdleEdgeWhenCollapsed: Bool,
+        usesDetailedClosedDisplay: Bool = false
     ) -> CGFloat {
         let popWidth = notchStatus == .popping ? 18 : 0
 
@@ -455,8 +472,11 @@ final class OverlayPanelController {
         let sideWidth = max(0, notchHeight - 12) + 10
         let digits = max(1, "\(liveSessionCount)".count)
         let countBadgeWidth = CGFloat(26 + max(0, digits - 1) * 8)
-        let leftWidth = sideWidth + 8 + (hasAttention ? 18 : 0)
-        let rightWidth = max(sideWidth, countBadgeWidth) + (hasAttention ? 18 : 0)
+        let detailedSpacing = usesDetailedClosedDisplay ? IslandChromeMetrics.closedDetailedTextSpacing : 0
+        let detailedStatusWidth = usesDetailedClosedDisplay ? IslandChromeMetrics.closedDetailedStatusTextWidth : 0
+        let detailedSessionWidth = usesDetailedClosedDisplay ? IslandChromeMetrics.closedDetailedSessionSuffixWidth : 0
+        let leftWidth = sideWidth + 8 + (hasAttention ? 18 : 0) + detailedSpacing + detailedStatusWidth
+        let rightWidth = max(sideWidth, countBadgeWidth) + (hasAttention ? 18 : 0) + detailedSpacing + detailedSessionWidth
         let expansionWidth = leftWidth + rightWidth + 16 + (hasAttention ? 6 : 0)
         return notchWidth + expansionWidth + CGFloat(popWidth)
     }
@@ -537,7 +557,8 @@ final class OverlayPanelController {
             liveSessionCount: model.liveSessionCount,
             hasAttention: spotlightSession?.phase.requiresAttention == true,
             notchStatus: model.notchStatus,
-            showsIdleEdgeWhenCollapsed: model.showsIdleEdgeWhenCollapsed
+            showsIdleEdgeWhenCollapsed: model.showsIdleEdgeWhenCollapsed,
+            usesDetailedClosedDisplay: model.usesDetailedClosedDisplay
         )
     }
 

@@ -247,6 +247,13 @@ final class AppModel {
 
     var isCustomAppearance: Bool { islandAppearanceMode == .custom }
 
+    /// Whether the collapsed island should include text labels instead of only
+    /// icon/count indicators. The style picker is only exposed in Custom mode,
+    /// so Default appearance keeps the built-in compact visual.
+    var usesDetailedClosedDisplay: Bool {
+        isCustomAppearance && islandClosedDisplayStyle == .detailed
+    }
+
     var islandClosedDisplayStyle: IslandClosedDisplayStyle = .detailed {
         didSet {
             guard islandClosedDisplayStyle != oldValue else { return }

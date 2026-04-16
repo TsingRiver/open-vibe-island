@@ -174,12 +174,43 @@ struct IslandPanelView: View {
         return CGFloat(26 + max(0, digits - 1) * 8)
     }
 
+    /// Extra status text width for the detailed closed style. Kept at zero for
+    /// the minimal style so existing compact geometry remains unchanged.
+    private var closedDetailedStatusTextWidth: CGFloat {
+        model.usesDetailedClosedDisplay ? IslandChromeMetrics.closedDetailedStatusTextWidth : 0
+    }
+
+    /// Extra session suffix width for the detailed closed style. Kept separate
+    /// from the count badge because the badge still needs its dynamic digit width.
+    private var closedDetailedSessionSuffixWidth: CGFloat {
+        model.usesDetailedClosedDisplay ? IslandChromeMetrics.closedDetailedSessionSuffixWidth : 0
+    }
+
+    /// Gap inserted only when detailed text is visible.
+    private var closedDetailedTextSpacing: CGFloat {
+        model.usesDetailedClosedDisplay ? IslandChromeMetrics.closedDetailedTextSpacing : 0
+    }
+
+    /// Left closed-lane width containing the glyph, optional attention icon, and
+    /// the detailed status label.
+    private var closedLeadingLaneWidth: CGFloat {
+        let hasAttention = closedSpotlightSession?.phase.requiresAttention == true
+        return sideWidth + 8 + (hasAttention ? 18 : 0) + closedDetailedTextSpacing + closedDetailedStatusTextWidth
+    }
+
+    /// Right closed-lane width containing the live-session count and optional
+    /// localized session suffix.
+    private var closedTrailingLaneWidth: CGFloat {
+        let hasAttention = closedSpotlightSession?.phase.requiresAttention == true
+        return max(sideWidth, countBadgeWidth) + (hasAttention ? 18 : 0) + closedDetailedTextSpacing + closedDetailedSessionSuffixWidth
+    }
+
     private var expansionWidth: CGFloat {
         guard !showsIdleEdgeWhenCollapsed else { return 0 }
         guard hasClosedPresence else { return 0 }
         let hasPending = closedSpotlightSession?.phase.requiresAttention == true
-        let leftWidth = sideWidth + 8 + (hasPending ? 18 : 0)
-        let rightWidth = max(sideWidth, countBadgeWidth) + (hasPending ? 18 : 0)
+        let leftWidth = closedLeadingLaneWidth
+        let rightWidth = closedTrailingLaneWidth
         return leftWidth + rightWidth + 16 + (hasPending ? 6 : 0)
     }
 
@@ -342,7 +373,7 @@ struct IslandPanelView: View {
         } else {
             HStack(spacing: 0) {
                 if hasClosedPresence {
-                    HStack(spacing: 4) {
+                    HStack(spacing: model.usesDetailedClosedDisplay ? 8 : 4) {
                         if model.isCustomAppearance {
                             IslandPixelGlyph(
                                 tint: scoutTint,
@@ -362,8 +393,20 @@ struct IslandPanelView: View {
                                 color: phaseColor(closedSpotlightSession?.phase ?? .running)
                             )
                         }
+
+                        if model.usesDetailedClosedDisplay, let spotlightSession = closedSpotlightSession {
+                            Text(closedPhaseTitle(spotlightSession.phase))
+                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(1)
+                                .frame(
+                                    width: IslandChromeMetrics.closedDetailedStatusTextWidth,
+                                    alignment: .leading
+                                )
+                                .accessibilityLabel(closedPhaseTitle(spotlightSession.phase))
+                        }
                     }
-                    .frame(width: sideWidth + 8 + (closedSpotlightSession?.phase.requiresAttention == true ? 18 : 0))
+                    .frame(width: closedLeadingLaneWidth)
                 }
 
                 if !hasClosedPresence {
@@ -377,13 +420,25 @@ struct IslandPanelView: View {
                 }
 
                 if hasClosedPresence {
-                    let attentionBalanceWidth: CGFloat = closedSpotlightSession?.phase.requiresAttention == true ? 18 : 0
-                    ClosedCountBadge(
-                        liveCount: model.liveSessionCount,
-                        tint: closedSpotlightSession?.phase.requiresAttention == true ? .orange : scoutTint
-                    )
-                    .matchedGeometryEffect(id: "right-indicator", in: notchNamespace, isSource: true)
-                    .frame(width: max(sideWidth, countBadgeWidth) + attentionBalanceWidth)
+                    HStack(spacing: model.usesDetailedClosedDisplay ? 8 : 0) {
+                        ClosedCountBadge(
+                            liveCount: model.liveSessionCount,
+                            tint: closedSpotlightSession?.phase.requiresAttention == true ? .orange : scoutTint
+                        )
+                        .matchedGeometryEffect(id: "right-indicator", in: notchNamespace, isSource: true)
+
+                        if model.usesDetailedClosedDisplay {
+                            Text(model.lang.t("settings.appearance.preview.sessions"))
+                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .lineLimit(1)
+                                .frame(
+                                    width: IslandChromeMetrics.closedDetailedSessionSuffixWidth,
+                                    alignment: .leading
+                                )
+                        }
+                    }
+                    .frame(width: closedTrailingLaneWidth)
                 }
             }
             .frame(height: closedNotchHeight)
@@ -617,6 +672,20 @@ struct IslandPanelView: View {
         case .waitingForApproval: .orange
         case .waitingForAnswer: .yellow
         case .completed: .blue
+        }
+    }
+
+    /// Localized phase label shown when the collapsed island uses Detailed style.
+    private func closedPhaseTitle(_ phase: SessionPhase) -> String {
+        switch phase {
+        case .running:
+            model.lang.t("settings.appearance.status.running")
+        case .waitingForApproval:
+            model.lang.t("settings.appearance.status.approval")
+        case .waitingForAnswer:
+            model.lang.t("settings.appearance.status.answer")
+        case .completed:
+            model.lang.t("settings.appearance.status.completed")
         }
     }
 

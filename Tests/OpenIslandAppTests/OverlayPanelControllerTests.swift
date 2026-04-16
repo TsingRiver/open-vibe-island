@@ -75,6 +75,23 @@ struct OverlayPanelControllerTests {
     }
 
     @Test
+    func detailedClosedWidthIncludesTextLanes() {
+        let width = OverlayPanelController.closedPanelWidth(
+            notchWidth: 224,
+            notchHeight: 38,
+            liveSessionCount: 3,
+            hasAttention: true,
+            notchStatus: .closed,
+            showsIdleEdgeWhenCollapsed: false,
+            usesDetailedClosedDisplay: true
+        )
+
+        // Detailed mode adds one localized status lane, one session-suffix lane,
+        // and a text gap on each side while preserving the existing center notch.
+        #expect(width == 530)
+    }
+
+    @Test
     func hiddenIdleEdgeHoverRectAnchorsToTopOfClosedArea() {
         let notchRect = NSRect(x: 400, y: 1_000, width: 224, height: 38)
 
