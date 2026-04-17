@@ -131,7 +131,7 @@ final class OverlayPanelController {
         panel.isMovable = false
         panel.hidesOnDeactivate = false
         panel.acceptsMouseMovedEvents = false
-        panel.collectionBehavior = [.fullScreenAuxiliary, .stationary, .canJoinAllSpaces, .ignoresCycle]
+        panel.collectionBehavior = [.fullScreenAuxiliary, .canJoinAllSpaces, .ignoresCycle]
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.ignoresMouseEvents = true
