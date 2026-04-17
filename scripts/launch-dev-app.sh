@@ -19,6 +19,45 @@ bundle_binary="$bundle_dir/Contents/MacOS/OpenIslandApp"
 
 cd "$repo_root"
 
+# Keep the generated dev bundle aligned with the latest public appcast entry.
+# OPEN_ISLAND_VERSION / OPEN_ISLAND_BUILD_NUMBER remain available for explicit
+# local release testing, while the default follows the online stable version.
+appcast_metadata="$(python3 - "$repo_root/appcast.xml" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+# Use the XML parser so Sparkle namespace handling stays stable as the feed
+# gains metadata. The first item is the newest public release by convention.
+sparkle_namespace = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+appcast_path = sys.argv[1]
+appcast = ET.parse(appcast_path)
+latest_item = appcast.find("./channel/item")
+latest_version = None
+latest_build = None
+
+if latest_item is not None:
+    # Read both bundle-facing version fields from the same appcast item so the
+    # generated Info.plist cannot mix metadata from different releases.
+    latest_version = latest_item.findtext(
+        "sparkle:shortVersionString",
+        namespaces=sparkle_namespace,
+    )
+    latest_build = latest_item.findtext(
+        "sparkle:version",
+        namespaces=sparkle_namespace,
+    )
+
+if not latest_version or not latest_build:
+    raise SystemExit("missing latest appcast version metadata")
+
+print(f"{latest_version} {latest_build}")
+PY
+)"
+appcast_short_version="${appcast_metadata%% *}"
+appcast_build_number="${appcast_metadata##* }"
+dev_short_version="${OPEN_ISLAND_VERSION:-$appcast_short_version}"
+dev_build_number="${OPEN_ISLAND_BUILD_NUMBER:-$appcast_build_number}"
+
 swift build -c debug --product OpenIslandApp
 swift build -c debug --product OpenIslandHooks
 swift build -c debug --product OpenIslandSetup
@@ -84,9 +123,9 @@ cat > "$plist_path" <<EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1</string>
+    <string>$dev_short_version</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$dev_build_number</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSAppleEventsUsageDescription</key>
