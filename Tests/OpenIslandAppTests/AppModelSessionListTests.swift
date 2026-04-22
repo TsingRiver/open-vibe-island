@@ -256,6 +256,74 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func codexDesktopCompletedThreadStaysAliveWithinGraceWindow() {
+        let now = Date.now
+        let model = AppModel()
+
+        var session = AgentSession(
+            id: "codex-desktop-completed-recent",
+            title: "Codex · open-island",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .completed,
+            summary: "Turn completed.",
+            updatedAt: now.addingTimeInterval(-30),
+            jumpTarget: JumpTarget(
+                terminalApp: "Codex.app",
+                workspaceName: "open-island",
+                paneTitle: "Codex · open-island",
+                workingDirectory: "/tmp/open-island",
+                codexThreadID: "codex-desktop-completed-recent"
+            )
+        )
+        session.isCodexAppSession = true
+        model.state = SessionState(sessions: [session])
+
+        let aliveIDs = model.monitoring.sessionIDsWithAliveProcesses(
+            activeProcesses: [],
+            sessions: model.state.sessions,
+            isCodexAppRunning: true
+        )
+
+        #expect(aliveIDs.contains("codex-desktop-completed-recent"))
+    }
+
+    @Test
+    func codexDesktopCompletedThreadExpiresAfterGraceWindow() {
+        let now = Date.now
+        let model = AppModel()
+
+        var session = AgentSession(
+            id: "codex-desktop-completed-stale",
+            title: "Codex · open-island",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .completed,
+            summary: "Turn completed.",
+            updatedAt: now.addingTimeInterval(-600),
+            jumpTarget: JumpTarget(
+                terminalApp: "Codex.app",
+                workspaceName: "open-island",
+                paneTitle: "Codex · open-island",
+                workingDirectory: "/tmp/open-island",
+                codexThreadID: "codex-desktop-completed-stale"
+            )
+        )
+        session.isCodexAppSession = true
+        model.state = SessionState(sessions: [session])
+
+        let aliveIDs = model.monitoring.sessionIDsWithAliveProcesses(
+            activeProcesses: [],
+            sessions: model.state.sessions,
+            isCodexAppRunning: true
+        )
+
+        #expect(!aliveIDs.contains("codex-desktop-completed-stale"))
+    }
+
+    @Test
     func jumpToSessionClosesOverlayBeforeTerminalJumpFinishes() async throws {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel { _ in

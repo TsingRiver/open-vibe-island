@@ -13,6 +13,11 @@ final class ProcessMonitoringCoordinator {
     /// instead of immediately dropping it after the next poll.
     private static let codexCoarsePresenceGraceWindow: TimeInterval = 15 * 60
 
+    /// Keep a recently completed Codex.app thread visible for a short grace
+    /// window so the user can still notice the finished result and jump back
+    /// immediately after completion before the row ages out of the live list.
+    private static let codexDesktopCompletedGraceWindow: TimeInterval = 2 * 60
+
     var isResolvingInitialLiveSessions = false
 
     @ObservationIgnored
@@ -281,17 +286,28 @@ final class ProcessMonitoringCoordinator {
         isCodexAppRunning: Bool
     ) -> Set<String> {
         var aliveIDs: Set<String> = []
+        let now = Date.now
 
         let codexProcesses = activeProcesses.filter { $0.tool == .codex }
         let trackedCodexSessions = sessions.filter { $0.tool == .codex && !sessionIsDemo($0) }
 
         // Exact session-ID matches remain authoritative for TTY-backed Codex
         // CLI processes, while Codex.app-backed sessions stay alive for as long
-        // as the desktop shell is still running.
+        // as the desktop shell is still running and the thread is still
+        // actionable, active, or within the short completed grace window.
         let codexProcessIDs = Set(codexProcesses.compactMap(\.sessionID))
         for session in trackedCodexSessions {
             if session.isCodexAppSession {
-                if isCodexAppRunning { aliveIDs.insert(session.id) }
+                guard isCodexAppRunning else {
+                    continue
+                }
+
+                // Codex.app exposes shell-level liveness, not per-thread PID
+                // liveness. Preserve rows only while the thread still needs
+                // user attention, is actively running, or has just completed.
+                if shouldKeepCodexDesktopSessionAlive(session, now: now) {
+                    aliveIDs.insert(session.id)
+                }
                 continue
             }
 
@@ -301,7 +317,6 @@ final class ProcessMonitoringCoordinator {
         }
 
         if codexProcesses.contains(where: { $0.sessionID == nil }) {
-            let now = Date.now
             for session in trackedCodexSessions
             where !session.isCodexAppSession
                 && shouldPreserveCodexLivenessFromCoarsePresence(session, now: now) {
@@ -461,6 +476,31 @@ final class ProcessMonitoringCoordinator {
         }
 
         return now.timeIntervalSince(session.updatedAt) <= Self.codexCoarsePresenceGraceWindow
+    }
+
+    /// Determines whether a Codex.app-backed thread should remain in the live
+    /// session list even though Codex only reports app-level shell liveness.
+    /// - Parameters:
+    ///   - session: The tracked Codex.app session being evaluated.
+    ///   - now: The reference timestamp used for grace-window comparisons.
+    /// - Returns: `true` when the thread is actionable, actively running, or
+    ///   recently completed inside the configured grace window.
+    private func shouldKeepCodexDesktopSessionAlive(
+        _ session: AgentSession,
+        now: Date
+    ) -> Bool {
+        if session.phase.requiresAttention {
+            return true
+        }
+
+        switch session.phase {
+        case .running:
+            return true
+        case .completed:
+            return now.timeIntervalSince(session.updatedAt) <= Self.codexDesktopCompletedGraceWindow
+        case .waitingForApproval, .waitingForAnswer:
+            return true
+        }
     }
 
     /// Local wrapper that keeps the codex/claude filtering call-sites readable.

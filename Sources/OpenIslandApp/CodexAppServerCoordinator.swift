@@ -115,7 +115,10 @@ final class CodexAppServerCoordinator {
 
     // MARK: - Notification handling
 
-    private func handleNotification(_ notification: CodexAppServerNotification) {
+    /// Translates a single Codex app-server notification into the standard
+    /// `AgentEvent` stream used by the rest of the app. This stays internal so
+    /// unit tests can verify end-signal mapping without a live subprocess.
+    func handleNotification(_ notification: CodexAppServerNotification) {
         switch notification {
         case .threadStarted(let thread):
             guard !thread.ephemeral else { return }
@@ -169,7 +172,20 @@ final class CodexAppServerCoordinator {
                         timestamp: .now
                     )
                 ))
-            case .notLoaded, .systemError:
+            case .notLoaded:
+                // The current app-server protocol does not expose a dedicated
+                // archive notification. Treat `notLoaded` as the closest
+                // available unload/archive-like signal so completed threads do
+                // not remain visible forever after they leave the live set.
+                onEvent?(.sessionCompleted(
+                    SessionCompleted(
+                        sessionID: threadId,
+                        summary: "Codex thread unloaded.",
+                        timestamp: .now,
+                        isSessionEnd: true
+                    )
+                ))
+            case .systemError:
                 break
             }
 
