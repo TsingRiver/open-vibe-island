@@ -103,6 +103,9 @@ if [ -d "$sparkle_framework" ]; then
     command cp -R "$sparkle_framework" "$bundle_dir/Contents/Frameworks/"
 fi
 
+# Embed the checkout root so the running dev bundle can safely fast-forward
+# origin/main and relaunch itself from the same workspace when a newer appcast
+# version is detected.
 cat > "$plist_path" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -126,6 +129,8 @@ cat > "$plist_path" <<EOF
     <string>$dev_short_version</string>
     <key>CFBundleVersion</key>
     <string>$dev_build_number</string>
+    <key>OpenIslandDevelopmentRepoRoot</key>
+    <string>$repo_root</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSAppleEventsUsageDescription</key>

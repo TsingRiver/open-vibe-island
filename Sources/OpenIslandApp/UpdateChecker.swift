@@ -16,11 +16,21 @@ final class UpdateChecker: NSObject {
     private(set) var hasUpdate = false
     private(set) var latestVersion: String?
 
+    /// Fires only for the locally generated dev bundle when a newer appcast item is found.
+    @ObservationIgnored
+    var onDevelopmentUpdateDetected: ((String) -> Void)?
+
     @ObservationIgnored
     private var updaterController: SPUStandardUpdaterController!
 
     @ObservationIgnored
     private var cancellable: AnyCancellable?
+
+    @ObservationIgnored
+    private var developmentPollingTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var hasStartedUpdater = false
 
     override init() {
         super.init()
@@ -34,18 +44,30 @@ final class UpdateChecker: NSObject {
     /// Start Sparkle's automatic update checking schedule.
     /// Call once after app launch.
     func startIfNeeded() {
+        guard !hasStartedUpdater else {
+            return
+        }
+
         #if DEBUG
-        // Dev builds run from a local branch that often carries fixes not yet in
-        // the upstream appcast. Letting Sparkle prompt the user to "update" to
-        // 1.0.21 would overwrite the bundle and silently discard those fixes.
-        // Skip the auto-check entirely in debug — release bundles still update.
-        print("[UpdateChecker] skipped in DEBUG build")
-        return
-        #else
+        guard isDevelopmentBundle else {
+            // Unit tests and non-dev debug launches do not carry the custom
+            // bundle metadata required for guarded repo sync. Keep their
+            // previous no-op behavior.
+            print("[UpdateChecker] skipped in DEBUG build without development bundle metadata")
+            return
+        }
+        #endif
+
+        hasStartedUpdater = true
+
         let updater = updaterController.updater
+        updater.automaticallyDownloadsUpdates = false
+        #if DEBUG
+        updater.automaticallyChecksForUpdates = false
+        #else
         updater.automaticallyChecksForUpdates = true
         updater.updateCheckInterval = 60 * 60 // 1 hour
-        updater.automaticallyDownloadsUpdates = false
+        #endif
 
         do {
             try updater.start()
@@ -58,12 +80,67 @@ final class UpdateChecker: NSObject {
             .sink { [weak self] value in
                 self?.canCheckForUpdates = value
             }
+
+        #if DEBUG
+        startDevelopmentPolling()
         #endif
     }
 
     /// Manually trigger an update check (from Settings UI).
     func checkForUpdates() {
+        #if DEBUG
+        guard isDevelopmentBundle else {
+            return
+        }
+        updaterController.updater.checkForUpdateInformation()
+        #else
         updaterController.checkForUpdates(nil)
+        #endif
+    }
+
+    /// Returns `true` only for the generated dev bundle that embeds its checkout root.
+    private var isDevelopmentBundle: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "OpenIslandDevelopmentRepoRoot") as? String != nil
+    }
+
+    /// Starts background informational probes so the dev bundle can detect new appcast versions
+    /// without letting Sparkle replace the checkout-built app with a release zip.
+    private func startDevelopmentPolling() {
+        guard developmentPollingTask == nil else {
+            return
+        }
+
+        developmentPollingTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            self.probeForDevelopmentUpdates()
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60 * 60))
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                self.probeForDevelopmentUpdates()
+            }
+        }
+    }
+
+    /// Runs a non-installing Sparkle probe for the dev bundle.
+    private func probeForDevelopmentUpdates() {
+        let updater = updaterController.updater
+        guard updater.canCheckForUpdates else {
+            return
+        }
+
+        updater.checkForUpdateInformation()
     }
 }
 
@@ -79,6 +156,11 @@ extension UpdateChecker: SPUUpdaterDelegate {
         Task { @MainActor in
             self.hasUpdate = true
             self.latestVersion = version
+            #if DEBUG
+            if self.isDevelopmentBundle {
+                self.onDevelopmentUpdateDetected?(version)
+            }
+            #endif
         }
     }
 

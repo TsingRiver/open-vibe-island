@@ -63,6 +63,7 @@ final class AppModel {
     let discovery = SessionDiscoveryCoordinator()
     let monitoring = ProcessMonitoringCoordinator()
     let codexAppServer = CodexAppServerCoordinator()
+    let developmentBuildSync = DevelopmentBuildSyncCoordinator()
     let updateChecker = UpdateChecker()
 
     var notchStatus: NotchStatus {
@@ -560,6 +561,14 @@ final class AppModel {
 
         hooks.onStatusMessage = { [weak self] message in
             self?.lastActionMessage = message
+        }
+
+        developmentBuildSync.onStatusMessage = { [weak self] message in
+            self?.lastActionMessage = message
+        }
+
+        updateChecker.onDevelopmentUpdateDetected = { [weak self] version in
+            self?.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
         }
 
         discovery.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix
