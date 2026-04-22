@@ -10,6 +10,7 @@ public struct CursorTrackedSessionRecord: Equatable, Codable, Sendable {
     public var updatedAt: Date
     public var jumpTarget: JumpTarget?
     public var cursorMetadata: CursorSessionMetadata?
+    public var isArchivedInIsland: Bool
 
     public init(
         sessionID: String,
@@ -20,7 +21,8 @@ public struct CursorTrackedSessionRecord: Equatable, Codable, Sendable {
         phase: SessionPhase,
         updatedAt: Date,
         jumpTarget: JumpTarget? = nil,
-        cursorMetadata: CursorSessionMetadata? = nil
+        cursorMetadata: CursorSessionMetadata? = nil,
+        isArchivedInIsland: Bool = false
     ) {
         self.sessionID = sessionID
         self.title = title
@@ -31,6 +33,7 @@ public struct CursorTrackedSessionRecord: Equatable, Codable, Sendable {
         self.updatedAt = updatedAt
         self.jumpTarget = jumpTarget
         self.cursorMetadata = cursorMetadata
+        self.isArchivedInIsland = isArchivedInIsland
     }
 
     public init(session: AgentSession) {
@@ -43,12 +46,13 @@ public struct CursorTrackedSessionRecord: Equatable, Codable, Sendable {
             phase: session.phase,
             updatedAt: session.updatedAt,
             jumpTarget: session.jumpTarget,
-            cursorMetadata: session.cursorMetadata
+            cursorMetadata: session.cursorMetadata,
+            isArchivedInIsland: session.isArchivedInIsland
         )
     }
 
     public var session: AgentSession {
-        AgentSession(
+        var session = AgentSession(
             id: sessionID,
             title: title,
             tool: .cursor,
@@ -60,12 +64,56 @@ public struct CursorTrackedSessionRecord: Equatable, Codable, Sendable {
             jumpTarget: jumpTarget,
             cursorMetadata: cursorMetadata
         )
+        session.isArchivedInIsland = isArchivedInIsland
+        return session
     }
 
     public var restorableSession: AgentSession {
         var session = session
         session.attachmentState = .stale
+        session.isArchivedInIsland = isArchivedInIsland
         return session
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionID
+        case title
+        case origin
+        case attachmentState
+        case summary
+        case phase
+        case updatedAt
+        case jumpTarget
+        case cursorMetadata
+        case isArchivedInIsland
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try container.decode(String.self, forKey: .sessionID)
+        title = try container.decode(String.self, forKey: .title)
+        origin = try container.decodeIfPresent(SessionOrigin.self, forKey: .origin)
+        attachmentState = try container.decodeIfPresent(SessionAttachmentState.self, forKey: .attachmentState) ?? .stale
+        summary = try container.decode(String.self, forKey: .summary)
+        phase = try container.decode(SessionPhase.self, forKey: .phase)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        jumpTarget = try container.decodeIfPresent(JumpTarget.self, forKey: .jumpTarget)
+        cursorMetadata = try container.decodeIfPresent(CursorSessionMetadata.self, forKey: .cursorMetadata)
+        isArchivedInIsland = try container.decodeIfPresent(Bool.self, forKey: .isArchivedInIsland) ?? false
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encode(attachmentState, forKey: .attachmentState)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(phase, forKey: .phase)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(jumpTarget, forKey: .jumpTarget)
+        try container.encodeIfPresent(cursorMetadata, forKey: .cursorMetadata)
+        try container.encode(isArchivedInIsland, forKey: .isArchivedInIsland)
     }
 }
 

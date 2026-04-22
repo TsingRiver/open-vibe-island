@@ -378,6 +378,11 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
     /// is considered gone. This prevents flicker from momentary `ps` gaps.
     public var processNotSeenCount: Int = 0
 
+    /// Local-only archive flag for the island UI. When `true`, the session
+    /// stays tracked for future restoration/persistence but is hidden from the
+    /// Open Island task list until fresh activity clears the archive state.
+    public var isArchivedInIsland: Bool = false
+
     public init(
         id: String,
         title: String,
@@ -431,6 +436,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         case geminiMetadata
         case openCodeMetadata
         case cursorMetadata
+        case isArchivedInIsland
     }
 
     public init(from decoder: any Decoder) throws {
@@ -451,6 +457,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         geminiMetadata = try container.decodeIfPresent(GeminiSessionMetadata.self, forKey: .geminiMetadata)
         openCodeMetadata = try container.decodeIfPresent(OpenCodeSessionMetadata.self, forKey: .openCodeMetadata)
         cursorMetadata = try container.decodeIfPresent(CursorSessionMetadata.self, forKey: .cursorMetadata)
+        isArchivedInIsland = try container.decodeIfPresent(Bool.self, forKey: .isArchivedInIsland) ?? false
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -471,6 +478,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         try container.encodeIfPresent(geminiMetadata, forKey: .geminiMetadata)
         try container.encodeIfPresent(openCodeMetadata, forKey: .openCodeMetadata)
         try container.encodeIfPresent(cursorMetadata, forKey: .cursorMetadata)
+        try container.encode(isArchivedInIsland, forKey: .isArchivedInIsland)
     }
 }
 

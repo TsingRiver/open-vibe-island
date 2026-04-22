@@ -88,6 +88,8 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
+
             let keepsPendingApproval = payload.phase == .running
                 && session.phase == .waitingForApproval
                 && session.permissionRequest != nil
@@ -115,6 +117,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.phase = .waitingForApproval
             session.summary = payload.request.summary
             session.permissionRequest = payload.request
@@ -127,6 +130,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.phase = .waitingForAnswer
             session.summary = payload.prompt.title
             session.questionPrompt = payload.prompt
@@ -139,6 +143,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.phase = .completed
             session.summary = payload.summary
             session.permissionRequest = nil
@@ -154,6 +159,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.jumpTarget = payload.jumpTarget
             session.updatedAt = payload.timestamp
             Self.refreshCodexAppClassification(for: &session)
@@ -164,6 +170,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.codexMetadata = payload.codexMetadata.isEmpty ? nil : payload.codexMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -173,6 +180,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.claudeMetadata = payload.claudeMetadata.isEmpty ? nil : payload.claudeMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -182,6 +190,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.geminiMetadata = payload.geminiMetadata.isEmpty ? nil : payload.geminiMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -191,6 +200,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.openCodeMetadata = payload.openCodeMetadata.isEmpty ? nil : payload.openCodeMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -200,6 +210,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.cursorMetadata = payload.cursorMetadata.isEmpty ? nil : payload.cursorMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -213,6 +224,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            restoreSessionInIslandIfNeeded(&session)
             session.phase = .running
             session.summary = payload.summary
             session.permissionRequest = nil
@@ -424,9 +436,6 @@ public struct SessionState: Equatable, Sendable {
         return changed
     }
 
-    /// Remove sessions that are no longer visible in the island.
-    /// Returns `true` if any sessions were removed.
-    @discardableResult
     /// Manually mark a session as completed and ended.
     /// Intended for remote sessions whose SSH tunnel dropped without a
     /// SessionEnd hook.
@@ -438,12 +447,40 @@ public struct SessionState: Equatable, Sendable {
         upsert(session)
     }
 
+    /// Marks a session as archived only in the island UI. The session remains
+    /// tracked so a future event with the same id can automatically unarchive it.
+    /// - Parameter id: The stable session identifier to archive locally.
+    public mutating func archiveSessionInIsland(id: String) {
+        guard var session = sessionsByID[id] else { return }
+        session.isArchivedInIsland = true
+        session.updatedAt = .now
+        upsert(session)
+    }
+
+    /// Remove sessions that are no longer visible in the island.
+    /// Returns `true` if any sessions were removed.
+    @discardableResult
     public mutating func removeInvisibleSessions() -> Bool {
         let before = sessionsByID.count
         sessionsByID = sessionsByID.filter { _, session in
-            session.isVisibleInIsland
+            // Keep locally archived sessions in memory so startup rediscovery
+            // and future thread activity can reuse the same record instead of
+            // recreating a visible row immediately after a manual archive.
+            session.isArchivedInIsland || session.isVisibleInIsland
         }
         return sessionsByID.count != before
+    }
+
+    /// Clears the local archive flag when fresh activity arrives for the same
+    /// tracked session. This lets a manually archived row reappear only when
+    /// the underlying thread actually becomes active again.
+    /// - Parameter session: The mutable session being refreshed by a new event.
+    private mutating func restoreSessionInIslandIfNeeded(_ session: inout AgentSession) {
+        guard session.isArchivedInIsland else {
+            return
+        }
+
+        session.isArchivedInIsland = false
     }
 
     private mutating func upsert(_ session: AgentSession) {

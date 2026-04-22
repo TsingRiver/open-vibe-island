@@ -45,6 +45,7 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
     public var updatedAt: Date
     public var jumpTarget: JumpTarget?
     public var codexMetadata: CodexSessionMetadata?
+    public var isArchivedInIsland: Bool
 
     public init(
         sessionID: String,
@@ -55,7 +56,8 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
         phase: SessionPhase,
         updatedAt: Date,
         jumpTarget: JumpTarget? = nil,
-        codexMetadata: CodexSessionMetadata? = nil
+        codexMetadata: CodexSessionMetadata? = nil,
+        isArchivedInIsland: Bool = false
     ) {
         self.sessionID = sessionID
         self.title = title
@@ -66,6 +68,7 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
         self.updatedAt = updatedAt
         self.jumpTarget = jumpTarget
         self.codexMetadata = codexMetadata
+        self.isArchivedInIsland = isArchivedInIsland
     }
 
     public init(session: AgentSession) {
@@ -78,7 +81,8 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
             phase: session.phase,
             updatedAt: session.updatedAt,
             jumpTarget: session.jumpTarget,
-            codexMetadata: session.codexMetadata
+            codexMetadata: session.codexMetadata,
+            isArchivedInIsland: session.isArchivedInIsland
         )
     }
 
@@ -99,6 +103,7 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
         // restarted sessions continue to use app-level liveness rather than
         // falling back to CLI subprocess matching (which would kill them).
         session.isCodexAppSession = jumpTarget?.terminalApp == "Codex.app"
+        session.isArchivedInIsland = isArchivedInIsland
         return session
     }
 
@@ -112,6 +117,7 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
         case updatedAt
         case jumpTarget
         case codexMetadata
+        case isArchivedInIsland
     }
 
     public init(from decoder: any Decoder) throws {
@@ -125,6 +131,7 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         jumpTarget = try container.decodeIfPresent(JumpTarget.self, forKey: .jumpTarget)
         codexMetadata = try container.decodeIfPresent(CodexSessionMetadata.self, forKey: .codexMetadata)
+        isArchivedInIsland = try container.decodeIfPresent(Bool.self, forKey: .isArchivedInIsland) ?? false
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -138,6 +145,7 @@ public struct CodexTrackedSessionRecord: Equatable, Codable, Sendable {
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(jumpTarget, forKey: .jumpTarget)
         try container.encodeIfPresent(codexMetadata, forKey: .codexMetadata)
+        try container.encode(isArchivedInIsland, forKey: .isArchivedInIsland)
     }
 }
 

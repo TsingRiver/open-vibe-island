@@ -225,6 +225,45 @@ struct SessionStateTests {
     }
 
     @Test
+    func archiveSessionInIslandKeepsRecordTrackedButHiddenUntilFreshActivityArrives() {
+        let startedAt = Date(timeIntervalSince1970: 5_800)
+        var session = AgentSession(
+            id: "codex-archived",
+            title: "Codex · repo",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .completed,
+            summary: "Turn completed.",
+            updatedAt: startedAt
+        )
+        session.isCodexAppSession = true
+
+        var state = SessionState(sessions: [session])
+        state.archiveSessionInIsland(id: "codex-archived")
+
+        #expect(state.session(id: "codex-archived")?.isArchivedInIsland == true)
+
+        _ = state.removeInvisibleSessions()
+        #expect(state.session(id: "codex-archived") != nil)
+
+        state.apply(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: "codex-archived",
+                    summary: "Codex is working again.",
+                    phase: .running,
+                    timestamp: startedAt.addingTimeInterval(10)
+                )
+            )
+        )
+
+        #expect(state.session(id: "codex-archived")?.isArchivedInIsland == false)
+        #expect(state.session(id: "codex-archived")?.phase == .running)
+        #expect(state.session(id: "codex-archived")?.summary == "Codex is working again.")
+    }
+
+    @Test
     func actionableStateResolvedIsNoOpWhenAlreadyRunning() {
         let startedAt = Date(timeIntervalSince1970: 6_000)
         var state = SessionState(

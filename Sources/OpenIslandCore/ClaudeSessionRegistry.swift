@@ -10,6 +10,7 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
     public var updatedAt: Date
     public var jumpTarget: JumpTarget?
     public var claudeMetadata: ClaudeSessionMetadata?
+    public var isArchivedInIsland: Bool
 
     public init(
         sessionID: String,
@@ -20,7 +21,8 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
         phase: SessionPhase,
         updatedAt: Date,
         jumpTarget: JumpTarget? = nil,
-        claudeMetadata: ClaudeSessionMetadata? = nil
+        claudeMetadata: ClaudeSessionMetadata? = nil,
+        isArchivedInIsland: Bool = false
     ) {
         self.sessionID = sessionID
         self.title = title
@@ -31,6 +33,7 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
         self.updatedAt = updatedAt
         self.jumpTarget = jumpTarget
         self.claudeMetadata = claudeMetadata
+        self.isArchivedInIsland = isArchivedInIsland
     }
 
     public init(session: AgentSession) {
@@ -43,12 +46,13 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
             phase: session.phase,
             updatedAt: session.updatedAt,
             jumpTarget: session.jumpTarget,
-            claudeMetadata: session.claudeMetadata
+            claudeMetadata: session.claudeMetadata,
+            isArchivedInIsland: session.isArchivedInIsland
         )
     }
 
     public var session: AgentSession {
-        AgentSession(
+        var session = AgentSession(
             id: sessionID,
             title: title,
             tool: .claudeCode,
@@ -60,11 +64,14 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
             jumpTarget: jumpTarget,
             claudeMetadata: claudeMetadata
         )
+        session.isArchivedInIsland = isArchivedInIsland
+        return session
     }
 
     public var restorableSession: AgentSession {
         var session = session
         session.attachmentState = .stale
+        session.isArchivedInIsland = isArchivedInIsland
         return session
     }
 
@@ -78,6 +85,7 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
         case updatedAt
         case jumpTarget
         case claudeMetadata
+        case isArchivedInIsland
     }
 
     public init(from decoder: any Decoder) throws {
@@ -91,6 +99,7 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         jumpTarget = try container.decodeIfPresent(JumpTarget.self, forKey: .jumpTarget)
         claudeMetadata = try container.decodeIfPresent(ClaudeSessionMetadata.self, forKey: .claudeMetadata)
+        isArchivedInIsland = try container.decodeIfPresent(Bool.self, forKey: .isArchivedInIsland) ?? false
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -104,6 +113,7 @@ public struct ClaudeTrackedSessionRecord: Equatable, Codable, Sendable {
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(jumpTarget, forKey: .jumpTarget)
         try container.encodeIfPresent(claudeMetadata, forKey: .claudeMetadata)
+        try container.encode(isArchivedInIsland, forKey: .isArchivedInIsland)
     }
 }
 

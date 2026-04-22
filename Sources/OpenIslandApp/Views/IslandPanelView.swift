@@ -679,7 +679,8 @@ struct IslandPanelView: View {
                     onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
                     onReply: TerminalTextSender.canReply(to: session, enabled: model.completionReplyEnabled)
                         ? { model.replyToSession(session, text: $0) } : nil,
-                    onJump: { model.jumpToSession(session) }
+                    onJump: { model.jumpToSession(session) },
+                    onArchive: session.phase == .completed ? { model.archiveSessionInIsland(session.id) } : nil
                 )
 
                 if model.allSessions.count > 1 {
@@ -709,7 +710,7 @@ struct IslandPanelView: View {
                         onReply: TerminalTextSender.canReply(to: session, enabled: model.completionReplyEnabled)
                             ? { model.replyToSession(session, text: $0) } : nil,
                         onJump: { model.jumpToSession(session) },
-                        onDismiss: session.isRemote ? { model.dismissSession(session.id) } : nil
+                        onArchive: session.phase == .completed ? { model.archiveSessionInIsland(session.id) } : nil
                     )
                 }
             }
@@ -1141,6 +1142,9 @@ private struct OpenedHeaderMetrics {
 // MARK: - Session row (opened state)
 
 private struct IslandSessionRow: View {
+    private static let archiveRevealWidth: CGFloat = 72
+    private static let archiveRevealThreshold: CGFloat = 36
+
     let session: AgentSession
     let referenceDate: Date
     var isActionable: Bool = false
@@ -1151,11 +1155,13 @@ private struct IslandSessionRow: View {
     var onAnswer: ((QuestionPromptResponse) -> Void)?
     var onReply: ((String) -> Void)?
     let onJump: () -> Void
-    var onDismiss: (() -> Void)?
+    var onArchive: (() -> Void)?
 
     @State private var isHighlighted = false
+    @State private var isHovered = false
     @State private var isManuallyExpanded = false
     @State private var replyText: String = ""
+    @State private var archiveRevealOffset: CGFloat = 0
 
     var body: some View {
         rowBody(referenceDate: referenceDate)
@@ -1165,7 +1171,71 @@ private struct IslandSessionRow: View {
         let rawPresence = session.islandPresence(at: referenceDate)
         let presence = (rawPresence == .inactive && isManuallyExpanded) ? .active : rawPresence
         let showsExpandedContent = presence != .inactive
-        return VStack(alignment: .leading, spacing: 0) {
+        return ZStack(alignment: .trailing) {
+            if canRevealArchive {
+                archiveActionLane
+            }
+
+            rowCard(presence: presence, showsExpandedContent: showsExpandedContent)
+                .offset(x: canRevealArchive ? -archiveRevealOffset : 0)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
+        .simultaneousGesture(archiveRevealGesture)
+        .onTapGesture(perform: handlePrimaryTap)
+        .onHover { hovering in
+            guard isInteractive else { return }
+            isHovered = hovering
+            isHighlighted = hovering
+            if !hovering {
+                closeArchiveReveal(animated: true)
+            }
+        }
+        .onChange(of: isInteractive) { _, interactive in
+            if !interactive {
+                isManuallyExpanded = false
+                closeArchiveReveal(animated: false)
+            }
+        }
+    }
+
+    /// Returns `true` only for completed rows in the opened list where the
+    /// user can deliberately reveal the local archive action with a left swipe.
+    private var canRevealArchive: Bool {
+        !isActionable && isInteractive && session.phase == .completed && onArchive != nil
+    }
+
+    /// Width of the trailing archive lane currently revealed by the swipe.
+    private var archiveLaneWidth: CGFloat {
+        canRevealArchive ? archiveRevealOffset : 0
+    }
+
+    /// Stable flag used to trigger the springy "jelly" pop once the swipe
+    /// settles open enough to expose the archive action clearly.
+    private var isArchiveButtonPresented: Bool {
+        archiveRevealOffset >= Self.archiveRevealThreshold
+    }
+
+    @ViewBuilder
+    private var archiveActionLane: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            ArchiveRevealButton(
+                action: handleArchiveAction,
+                isPresented: isArchiveButtonPresented,
+                revealProgress: min(1, archiveLaneWidth / Self.archiveRevealWidth)
+            )
+            .frame(width: Self.archiveRevealWidth, height: 44)
+            .padding(.trailing, 10)
+            .opacity(min(1, archiveLaneWidth / 18))
+        }
+    }
+
+    private func rowCard(
+        presence: IslandSessionPresence,
+        showsExpandedContent: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 14) {
                 statusDot(for: presence)
 
@@ -1187,9 +1257,6 @@ private struct IslandSessionRow: View {
                                 compactBadge(terminalBadge, presence: presence)
                             }
                             compactBadge(session.spotlightAgeBadge, presence: presence)
-                            if let onDismiss {
-                                DismissButton(action: onDismiss)
-                            }
                         }
                     }
 
@@ -1308,18 +1375,68 @@ private struct IslandSessionRow: View {
             alignment: .bottom
         )
         .modifier(ConditionalDrawingGroup(enabled: useDrawingGroup && !isActionable))
-        .contentShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
         .animation(.easeInOut(duration: 0.15), value: isHighlighted)
-        .onTapGesture(perform: handlePrimaryTap)
-        .onHover { hovering in
-            guard isInteractive else { return }
-            isHighlighted = hovering
-        }
-        .onChange(of: isInteractive) { _, interactive in
-            if !interactive {
-                isManuallyExpanded = false
+    }
+
+    /// Horizontal swipe recognizer used to reveal the local archive action.
+    /// We only react when the horizontal translation dominates the vertical one
+    /// so normal list scrolling keeps working.
+    private var archiveRevealGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard canRevealArchive, isHovered else {
+                    return
+                }
+
+                let horizontalTravel = max(0, -value.translation.width)
+                let verticalTravel = abs(value.translation.height)
+                guard horizontalTravel > verticalTravel else {
+                    return
+                }
+
+                archiveRevealOffset = min(Self.archiveRevealWidth, horizontalTravel)
             }
+            .onEnded { value in
+                guard canRevealArchive else {
+                    return
+                }
+
+                let horizontalTravel = max(0, -value.translation.width)
+                let verticalTravel = abs(value.translation.height)
+                guard horizontalTravel > verticalTravel else {
+                    closeArchiveReveal(animated: true)
+                    return
+                }
+
+                let shouldReveal = horizontalTravel >= Self.archiveRevealThreshold
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.62)) {
+                    archiveRevealOffset = shouldReveal ? Self.archiveRevealWidth : 0
+                }
+            }
+    }
+
+    /// Hides the swipe-revealed archive action, optionally animating the row
+    /// back into place after hover exits or the user taps elsewhere.
+    /// - Parameter animated: Whether to spring the row closed.
+    private func closeArchiveReveal(animated: Bool) {
+        guard archiveRevealOffset > 0 else {
+            return
         }
+
+        if animated {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.74)) {
+                archiveRevealOffset = 0
+            }
+        } else {
+            archiveRevealOffset = 0
+        }
+    }
+
+    /// Archives the row only inside Open Island and immediately closes the
+    /// revealed action lane so the list can settle without a stuck offset.
+    private func handleArchiveAction() {
+        closeArchiveReveal(animated: false)
+        onArchive?()
     }
 
     private var actionableBorderColor: Color {
@@ -1602,6 +1719,11 @@ private struct IslandSessionRow: View {
     }
 
     private func handlePrimaryTap() {
+        if archiveRevealOffset > 0 {
+            closeArchiveReveal(animated: true)
+            return
+        }
+
         let rawPresence = session.islandPresence(at: referenceDate)
         if rawPresence == .inactive && !isManuallyExpanded {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -2409,17 +2531,32 @@ extension MarkdownUI.Theme {
         }
 }
 
-private struct DismissButton: View {
+private struct ArchiveRevealButton: View {
     let action: () -> Void
+    let isPresented: Bool
+    let revealProgress: CGFloat
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(isHovered ? 0.8 : 0.4))
+            Image(systemName: "archivebox.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white.opacity(isHovered ? 0.98 : 0.92))
+                .frame(width: 40, height: 40)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(red: 0.88, green: 0.27, blue: 0.33).opacity(isHovered ? 0.96 : 0.9))
+                )
+                .scaleEffect(
+                    x: isPresented ? 1 : (0.82 + revealProgress * 0.18),
+                    y: isPresented ? 1 : (0.72 + revealProgress * 0.28)
+                )
+                .rotationEffect(.degrees(isPresented ? 0 : -5))
+                .shadow(color: Color(red: 0.88, green: 0.27, blue: 0.33).opacity(0.28), radius: 12, y: 6)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Archive in Open Island")
+        .animation(.spring(response: 0.3, dampingFraction: 0.48), value: isPresented)
         .onHover { isHovered = $0 }
     }
 }

@@ -324,6 +324,45 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func archivedCompletedSessionIsHiddenFromIslandBuckets() {
+        let now = Date.now
+        let model = AppModel()
+
+        var archived = AgentSession(
+            id: "archived-completed",
+            title: "Codex · archived",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .completed,
+            summary: "Old lingering row.",
+            updatedAt: now.addingTimeInterval(-30)
+        )
+        archived.isCodexAppSession = true
+        archived.isProcessAlive = true
+        archived.isArchivedInIsland = true
+
+        var visible = AgentSession(
+            id: "visible-running",
+            title: "Codex · running",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Active work.",
+            updatedAt: now
+        )
+        visible.isProcessAlive = true
+
+        model.state = SessionState(sessions: [archived, visible])
+
+        #expect(model.sessions.map(\.id) == ["visible-running"])
+        #expect(model.allSessions.map(\.id) == ["visible-running"])
+        #expect(model.surfacedSessions.map(\.id) == ["visible-running"])
+        #expect(model.recentSessions.isEmpty)
+    }
+
+    @Test
     func jumpToSessionClosesOverlayBeforeTerminalJumpFinishes() async throws {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel { _ in

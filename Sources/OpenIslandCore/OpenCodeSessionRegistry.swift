@@ -10,6 +10,7 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
     public var updatedAt: Date
     public var jumpTarget: JumpTarget?
     public var openCodeMetadata: OpenCodeSessionMetadata?
+    public var isArchivedInIsland: Bool
 
     public init(
         sessionID: String,
@@ -20,7 +21,8 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
         phase: SessionPhase,
         updatedAt: Date,
         jumpTarget: JumpTarget? = nil,
-        openCodeMetadata: OpenCodeSessionMetadata? = nil
+        openCodeMetadata: OpenCodeSessionMetadata? = nil,
+        isArchivedInIsland: Bool = false
     ) {
         self.sessionID = sessionID
         self.title = title
@@ -31,6 +33,7 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
         self.updatedAt = updatedAt
         self.jumpTarget = jumpTarget
         self.openCodeMetadata = openCodeMetadata
+        self.isArchivedInIsland = isArchivedInIsland
     }
 
     public init(session: AgentSession) {
@@ -43,12 +46,13 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
             phase: session.phase,
             updatedAt: session.updatedAt,
             jumpTarget: session.jumpTarget,
-            openCodeMetadata: session.openCodeMetadata
+            openCodeMetadata: session.openCodeMetadata,
+            isArchivedInIsland: session.isArchivedInIsland
         )
     }
 
     public var session: AgentSession {
-        AgentSession(
+        var session = AgentSession(
             id: sessionID,
             title: title,
             tool: .openCode,
@@ -60,11 +64,14 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
             jumpTarget: jumpTarget,
             openCodeMetadata: openCodeMetadata
         )
+        session.isArchivedInIsland = isArchivedInIsland
+        return session
     }
 
     public var restorableSession: AgentSession {
         var session = session
         session.attachmentState = .stale
+        session.isArchivedInIsland = isArchivedInIsland
         return session
     }
 
@@ -78,6 +85,7 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
         case updatedAt
         case jumpTarget
         case openCodeMetadata
+        case isArchivedInIsland
     }
 
     public init(from decoder: any Decoder) throws {
@@ -91,6 +99,7 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         jumpTarget = try container.decodeIfPresent(JumpTarget.self, forKey: .jumpTarget)
         openCodeMetadata = try container.decodeIfPresent(OpenCodeSessionMetadata.self, forKey: .openCodeMetadata)
+        isArchivedInIsland = try container.decodeIfPresent(Bool.self, forKey: .isArchivedInIsland) ?? false
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -104,6 +113,7 @@ public struct OpenCodeTrackedSessionRecord: Equatable, Codable, Sendable {
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(jumpTarget, forKey: .jumpTarget)
         try container.encodeIfPresent(openCodeMetadata, forKey: .openCodeMetadata)
+        try container.encode(isArchivedInIsland, forKey: .isArchivedInIsland)
     }
 }
 

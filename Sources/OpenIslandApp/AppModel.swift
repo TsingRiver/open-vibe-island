@@ -629,11 +629,11 @@ final class AppModel {
     }
 
     var sessions: [AgentSession] {
-        state.sessions
+        state.sessions.filter { !$0.isArchivedInIsland }
     }
 
     var allSessions: [AgentSession] {
-        state.sessions
+        sessions
     }
 
     /// Measured by SwiftUI GeometryReader in notification mode. Used by panel controller for sizing.
@@ -683,7 +683,10 @@ final class AppModel {
     }
 
     var focusedSession: AgentSession? {
-        state.session(id: selectedSessionID) ?? surfacedSessions.first ?? state.activeActionableSession ?? state.sessions.first
+        state.session(id: selectedSessionID).flatMap { $0.isArchivedInIsland ? nil : $0 }
+            ?? surfacedSessions.first
+            ?? state.activeActionableSession
+            ?? sessions.first
     }
 
     var activeIslandCardSession: AgentSession? {
@@ -1157,6 +1160,21 @@ final class AppModel {
         synchronizeSelection()
     }
 
+    /// Archives a single session only inside Open Island. The underlying agent
+    /// thread is untouched; only the local island presentation is hidden until
+    /// fresh activity on the same session id restores it.
+    /// - Parameter sessionID: The stable tracked session identifier to archive.
+    func archiveSessionInIsland(_ sessionID: String) {
+        state.archiveSessionInIsland(id: sessionID)
+        dismissNotificationSurfaceIfPresent(for: sessionID)
+        synchronizeSelection()
+        refreshOverlayPlacementIfVisible()
+        discovery.scheduleCodexSessionPersistence()
+        discovery.scheduleClaudeSessionPersistence()
+        discovery.scheduleOpenCodeSessionPersistence()
+        discovery.scheduleCursorSessionPersistence()
+    }
+
     func answerQuestion(for sessionID: String, answer: QuestionPromptResponse) {
         guard let session = state.session(id: sessionID) else {
             return
@@ -1434,7 +1452,7 @@ final class AppModel {
         var primary: [AgentSession] = []
         var claimedLiveAttachmentKeys: Set<String> = []
 
-        for session in rankedSessions where session.isVisibleInIsland {
+        for session in rankedSessions where session.isVisibleInIsland && !session.isArchivedInIsland {
             guard !session.isSubagentSession else { continue }
 
             if let liveAttachmentKey = monitoring.liveAttachmentKey(for: session) {
@@ -1447,7 +1465,11 @@ final class AppModel {
         }
 
         let primaryIDs = Set(primary.map(\.id))
-        let overflow = rankedSessions.filter { !primaryIDs.contains($0.id) && !$0.isSubagentSession }
+        let overflow = rankedSessions.filter {
+            !primaryIDs.contains($0.id)
+                && !$0.isSubagentSession
+                && !$0.isArchivedInIsland
+        }
         return (primary, overflow)
     }
 
