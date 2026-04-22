@@ -126,7 +126,7 @@ struct ActiveAgentProcessDiscoveryTests {
                 sessionID: nil,
                 workingDirectory: nil,
                 terminalTTY: nil,
-                terminalApp: "Codex"
+                terminalApp: "Codex.app"
             ),
         ])
     }

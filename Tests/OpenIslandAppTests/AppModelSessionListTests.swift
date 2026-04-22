@@ -214,7 +214,8 @@ struct AppModelSessionListTests {
                     terminalApp: "Codex"
                 ),
             ],
-            sessions: model.state.sessions
+            sessions: model.state.sessions,
+            isCodexAppRunning: true
         )
 
         #expect(aliveIDs.contains("codex-desktop-live"))
@@ -247,7 +248,8 @@ struct AppModelSessionListTests {
                     terminalApp: "Codex"
                 ),
             ],
-            sessions: model.state.sessions
+            sessions: model.state.sessions,
+            isCodexAppRunning: true
         )
 
         #expect(!aliveIDs.contains("codex-recovered"))

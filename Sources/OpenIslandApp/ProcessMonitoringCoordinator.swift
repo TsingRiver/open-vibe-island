@@ -30,6 +30,10 @@ final class ProcessMonitoringCoordinator {
     @ObservationIgnored
     var onPersistenceNeeded: (() -> Void)?
 
+    /// Fires when Codex.app is detected as running / no longer running.
+    @ObservationIgnored
+    var onCodexAppRunningChanged: ((_ isRunning: Bool) -> Void)?
+
     @ObservationIgnored
     let activeAgentProcessDiscovery = ActiveAgentProcessDiscovery()
 
@@ -41,6 +45,11 @@ final class ProcessMonitoringCoordinator {
 
     @ObservationIgnored
     private var sessionAttachmentMonitorTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var wasCodexAppRunning = false
+
+    private static let cursorStalenessTimeout: TimeInterval = 600  // 10 minutes
 
     private var state: SessionState {
         get { stateAccessor?() ?? SessionState() }
@@ -113,6 +122,16 @@ final class ProcessMonitoringCoordinator {
         // Adopt process TTYs inline on local copy.
         adoptProcessTTYsForClaudeSessions(activeProcesses: activeProcesses, sessions: &local)
 
+        // Detect Codex.app running state BEFORE the empty-sessions early
+        // return — we need to fire the callback on a brand-new Codex.app
+        // launch even when no sessions exist yet, so the app-server
+        // coordinator can connect and report threads.
+        let isCodexAppRunning = Self.isCodexDesktopAppRunning()
+        if isCodexAppRunning != wasCodexAppRunning {
+            wasCodexAppRunning = isCodexAppRunning
+            onCodexAppRunningChanged?(isCodexAppRunning)
+        }
+
         let sessions = local.sessions.filter(\.isTrackedLiveSession)
         guard !sessions.isEmpty else {
             // Flush local changes only if something actually changed.
@@ -153,9 +172,13 @@ final class ProcessMonitoringCoordinator {
         // Phase 1: populate isProcessAlive in parallel with existing system.
         let aliveIDs = sessionIDsWithAliveProcesses(
             activeProcesses: activeProcesses,
-            sessions: local.sessions
+            sessions: local.sessions,
+            isCodexAppRunning: isCodexAppRunning
         )
-        _ = local.markProcessLiveness(aliveSessionIDs: aliveIDs)
+        _ = local.markProcessLiveness(
+            aliveSessionIDs: aliveIDs,
+            isCodexAppRunning: isCodexAppRunning
+        )
 
         // Resolve jump targets via the new focused resolver.
         // When pre-resolved targets are provided (computed off-main-actor),
@@ -245,14 +268,17 @@ final class ProcessMonitoringCoordinator {
 
     // MARK: - Process liveness
 
-    /// Resolves the sessions that should remain process-alive for this poll.
+    /// Resolves the session IDs whose backing agent presence should be treated
+    /// as alive for the current poll.
     /// - Parameters:
     ///   - activeProcesses: Active agent process snapshots discovered from macOS.
     ///   - sessions: The reconciled in-memory sessions for the current pass.
+    ///   - isCodexAppRunning: Whether the desktop Codex.app shell is currently running.
     /// - Returns: Session IDs that should keep `isProcessAlive == true`.
     func sessionIDsWithAliveProcesses(
         activeProcesses: [ActiveProcessSnapshot],
-        sessions: [AgentSession]
+        sessions: [AgentSession],
+        isCodexAppRunning: Bool
     ) -> Set<String> {
         var aliveIDs: Set<String> = []
 
@@ -260,15 +286,25 @@ final class ProcessMonitoringCoordinator {
         let trackedCodexSessions = sessions.filter { $0.tool == .codex && !sessionIsDemo($0) }
 
         // Exact session-ID matches remain authoritative for TTY-backed Codex
-        // CLI processes.
+        // CLI processes, while Codex.app-backed sessions stay alive for as long
+        // as the desktop shell is still running.
         let codexProcessIDs = Set(codexProcesses.compactMap(\.sessionID))
-        for session in trackedCodexSessions where codexProcessIDs.contains(session.id) {
-            aliveIDs.insert(session.id)
+        for session in trackedCodexSessions {
+            if session.isCodexAppSession {
+                if isCodexAppRunning { aliveIDs.insert(session.id) }
+                continue
+            }
+
+            if codexProcessIDs.contains(session.id) {
+                aliveIDs.insert(session.id)
+            }
         }
 
         if codexProcesses.contains(where: { $0.sessionID == nil }) {
             let now = Date.now
-            for session in trackedCodexSessions where shouldPreserveCodexLivenessFromCoarsePresence(session, now: now) {
+            for session in trackedCodexSessions
+            where !session.isCodexAppSession
+                && shouldPreserveCodexLivenessFromCoarsePresence(session, now: now) {
                 aliveIDs.insert(session.id)
             }
         }
@@ -310,12 +346,37 @@ final class ProcessMonitoringCoordinator {
             claimedSessionIDs.insert(matched.id)
         }
 
-        // OpenCode sessions: the JS plugin runs inside the OpenCode process.
-        // We can't match by session ID (plugin doesn't expose it to ps), so
-        // keep all OpenCode sessions alive as long as any OpenCode process exists.
-        let hasOpenCodeProcess = activeProcesses.contains { $0.tool == .openCode }
-        if hasOpenCodeProcess {
-            for session in sessions where session.tool == .openCode && !session.isDemoSession {
+        // OpenCode sessions are hook-managed, but OpenCode does not expose a stable
+        // session ID through process discovery. Match each active OpenCode process
+        // to at most one tracked session.
+        let openCodeProcesses = activeProcesses.filter { $0.tool == .openCode }
+        // Do not filter by `isHookManaged` here because restored sessions drop that flag.
+        let trackedOpenCodeSessions = sessions.filter { $0.tool == .openCode && !$0.isDemoSession }
+        var claimedOpenCodeSessionIDs: Set<String> = []
+        var hasUnmatchedOpenCodeProcess = false
+
+        for process in openCodeProcesses {
+            let matchResult = uniqueTrackedOpenCodeSession(
+                for: process,
+                sessions: trackedOpenCodeSessions,
+                claimedSessionIDs: claimedOpenCodeSessionIDs
+            )
+            switch matchResult {
+            case .matched(let matched):
+                aliveIDs.insert(matched.id)
+                claimedOpenCodeSessionIDs.insert(matched.id)
+            case .ambiguous:
+                hasUnmatchedOpenCodeProcess = true
+            case .rejectedConflict:
+                break
+            }
+        }
+
+        // Fallback: If there are active OpenCode processes that we couldn't uniquely
+        // match, keep all remaining unclaimed OpenCode sessions alive to prevent
+        // incorrectly marking them as ended.
+        if hasUnmatchedOpenCodeProcess {
+            for session in trackedOpenCodeSessions where !claimedOpenCodeSessionIDs.contains(session.id) {
                 aliveIDs.insert(session.id)
             }
         }
@@ -340,15 +401,35 @@ final class ProcessMonitoringCoordinator {
             claimedGeminiSessionIDs.insert(matched.id)
         }
 
+        // Kimi sessions are hook-managed and use UUIDs that Open Island cannot
+        // recover from ps/lsof. As long as any kimi process exists, keep every
+        // tracked Kimi session alive so Stop/completed sessions don't get
+        // evicted by the hook-managed liveness fallback in
+        // SessionState.markProcessLiveness.
+        let hasKimiProcess = activeProcesses.contains { $0.tool == .kimiCLI }
+        if hasKimiProcess {
+            for session in sessions where session.tool == .kimiCLI && !session.isDemoSession {
+                aliveIDs.insert(session.id)
+            }
+        }
+
         // Cursor sessions: Cursor is an Electron IDE — we cannot match
-        // individual session IDs from ps/lsof.  Keep all Cursor sessions
-        // alive as long as Cursor.app is running.
+        // individual session IDs from ps/lsof.  Keep Cursor sessions alive
+        // while Cursor.app is running, but let completed sessions expire
+        // after a staleness window so the notch clears when the user is
+        // no longer interacting with the conversation.  Cursor has no
+        // "tab closed" hook, so this timeout is the best available proxy.
         let isCursorRunning = !NSRunningApplication.runningApplications(
             withBundleIdentifier: "com.todesktop.230313mzl4w4u92"
         ).isEmpty
         if isCursorRunning {
             for session in sessions where session.tool == .cursor && !session.isDemoSession {
-                aliveIDs.insert(session.id)
+                if session.isSessionEnded { continue }
+                let isStale = session.phase == .completed
+                    && session.updatedAt.addingTimeInterval(Self.cursorStalenessTimeout) < Date.now
+                if !isStale {
+                    aliveIDs.insert(session.id)
+                }
             }
         }
 
@@ -387,6 +468,69 @@ final class ProcessMonitoringCoordinator {
     /// - Returns: `true` when the session is a non-demo record.
     private func sessionIsDemo(_ session: AgentSession) -> Bool {
         session.isDemoSession
+    }
+
+    private enum OpenCodeMatchResult {
+        case matched(AgentSession)
+        case ambiguous
+        case rejectedConflict
+    }
+
+    /// Finds one unclaimed OpenCode session that can be represented by a process snapshot.
+    /// - Parameters:
+    ///   - process: Active OpenCode CLI process discovered from macOS process inspection.
+    ///   - sessions: Candidate OpenCode sessions that are tracked in the current state.
+    ///   - claimedSessionIDs: Session IDs already matched to earlier process snapshots.
+    /// - Returns: The best unclaimed session for this process, or an ambiguity/conflict marker.
+    private func uniqueTrackedOpenCodeSession(
+        for process: ActiveProcessSnapshot,
+        sessions: [AgentSession],
+        claimedSessionIDs: Set<String>
+    ) -> OpenCodeMatchResult {
+        let unclaimedSessions = sessions.filter { !claimedSessionIDs.contains($0.id) }
+        guard !unclaimedSessions.isEmpty else {
+            return .ambiguous
+        }
+
+        if let terminalTTY = normalizedTTYForMatching(process.terminalTTY) {
+            let candidates = unclaimedSessions.filter {
+                normalizedTTYForMatching($0.jumpTarget?.terminalTTY) == terminalTTY
+            }
+            if candidates.count == 1 {
+                let candidate = candidates[0]
+                if let processCWD = normalizedPathForMatching(process.workingDirectory),
+                   let sessionCWD = normalizedPathForMatching(candidate.jumpTarget?.workingDirectory),
+                   processCWD != sessionCWD {
+                    // TTY matched, but CWD explicitly differs (e.g., terminal tab was reused in another directory).
+                    return .rejectedConflict
+                }
+                return .matched(candidate)
+            }
+            if !candidates.isEmpty {
+                if let processCWD = normalizedPathForMatching(process.workingDirectory) {
+                    let cwdCandidates = candidates.filter {
+                        normalizedPathForMatching($0.jumpTarget?.workingDirectory) == processCWD
+                    }
+                    if cwdCandidates.count == 1 {
+                        return .matched(cwdCandidates[0])
+                    }
+                }
+                return .ambiguous
+            }
+        }
+
+        if let processCWD = normalizedPathForMatching(process.workingDirectory) {
+            let workspaceMatches = unclaimedSessions.filter {
+                normalizedPathForMatching($0.jumpTarget?.workingDirectory) == processCWD
+            }
+            if workspaceMatches.count == 1 {
+                return .matched(workspaceMatches[0])
+            }
+        }
+
+        // We require at least a positive match on TTY or CWD.
+        // Do not blindly link the process just because only one session remains.
+        return .ambiguous
     }
 
     /// Finds one unclaimed Gemini session that can be represented by a process snapshot.
@@ -783,6 +927,19 @@ final class ProcessMonitoringCoordinator {
 
     // MARK: - Utilities
 
+    /// Check whether Codex.app is currently running.  Uses
+    /// `NSWorkspace.shared.runningApplications` directly because
+    /// `NSRunningApplication.runningApplications(withBundleIdentifier:)`
+    /// has been observed to intermittently return an empty array even
+    /// when the app is running (likely a brief indexing window after
+    /// app launch / conversation switch), which would cause Open Island
+    /// to incorrectly kill visible Codex sessions.
+    static func isCodexDesktopAppRunning() -> Bool {
+        NSWorkspace.shared.runningApplications.contains { app in
+            app.bundleIdentifier == "com.openai.codex"
+        }
+    }
+
     private func processIdentityKey(_ process: ActiveProcessSnapshot) -> String {
         [
             process.sessionID,
@@ -927,6 +1084,8 @@ final class ProcessMonitoringCoordinator {
             return "CodeBuddy \(session.id.prefix(8))"
         case .cursor:
             return "Cursor \(session.id.prefix(8))"
+        case .kimiCLI:
+            return "Kimi \(session.id.prefix(8))"
         }
     }
 }
