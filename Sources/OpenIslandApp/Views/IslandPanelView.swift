@@ -1201,10 +1201,12 @@ private struct IslandSessionRow: View {
         }
     }
 
-    /// Returns `true` for non-actionable rows where the user can deliberately
-    /// reveal the local-only archive action with a left swipe.
+    /// Returns `true` for rows where the user can deliberately reveal the
+    /// local-only archive action with a left swipe. Visual "actionable" styling
+    /// is intentionally ignored here because the focused running card also uses
+    /// that presentation path; only real approval/answer prompts are protected.
     private var canRevealArchive: Bool {
-        !isActionable && isInteractive && onArchive != nil
+        !session.phase.requiresAttention && isInteractive && onArchive != nil
     }
 
     /// Width of the trailing archive lane currently revealed by the swipe.
