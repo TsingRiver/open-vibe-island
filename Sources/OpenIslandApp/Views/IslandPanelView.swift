@@ -1216,12 +1216,12 @@ private struct IslandSessionRow: View {
         }
     }
 
-    /// Returns `true` for rows where the user can deliberately reveal the
-    /// local-only archive action with a left swipe. Visual "actionable" styling
-    /// is intentionally ignored here because the focused running card also uses
-    /// that presentation path; only real approval/answer prompts are protected.
+    /// Returns `true` for completed rows where the user can deliberately reveal
+    /// the local-only archive action with a left swipe. Running or
+    /// attention-needed rows stay visible so active work is not hidden
+    /// accidentally.
     private var canRevealArchive: Bool {
-        !session.phase.requiresAttention && isInteractive && onArchive != nil
+        session.phase == .completed && isInteractive && onArchive != nil
     }
 
     /// Width of the trailing archive lane currently revealed by the swipe.
@@ -1440,7 +1440,7 @@ private struct IslandSessionRow: View {
     /// macOS, not as SwiftUI `DragGesture` updates, so this is the reliable
     /// path for revealing the archive action with a trackpad.
     private func installArchiveScrollWheelMonitorIfNeeded() {
-        guard archiveScrollWheelMonitor == nil else {
+        guard canRevealArchive, archiveScrollWheelMonitor == nil else {
             return
         }
 
