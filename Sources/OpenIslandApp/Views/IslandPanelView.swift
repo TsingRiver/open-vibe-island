@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 @preconcurrency import MarkdownUI
 import OpenIslandCore
@@ -1162,6 +1163,7 @@ private struct IslandSessionRow: View {
     @State private var isManuallyExpanded = false
     @State private var replyText: String = ""
     @State private var archiveRevealOffset: CGFloat = 0
+    @State private var archiveScrollWheelMonitor: Any?
 
     var body: some View {
         rowBody(referenceDate: referenceDate)
@@ -1189,15 +1191,28 @@ private struct IslandSessionRow: View {
             guard isInteractive else { return }
             isHovered = hovering
             isHighlighted = hovering
-            if !hovering {
+            if hovering {
+                installArchiveScrollWheelMonitorIfNeeded()
+            } else {
+                removeArchiveScrollWheelMonitor()
                 closeArchiveReveal(animated: true)
             }
         }
         .onChange(of: isInteractive) { _, interactive in
             if !interactive {
                 isManuallyExpanded = false
+                removeArchiveScrollWheelMonitor()
                 closeArchiveReveal(animated: false)
             }
+        }
+        .onChange(of: canRevealArchive) { _, canReveal in
+            if !canReveal {
+                removeArchiveScrollWheelMonitor()
+                closeArchiveReveal(animated: false)
+            }
+        }
+        .onDisappear {
+            removeArchiveScrollWheelMonitor()
         }
     }
 
@@ -1418,6 +1433,62 @@ private struct IslandSessionRow: View {
                     archiveRevealOffset = shouldReveal ? Self.archiveRevealWidth : 0
                 }
             }
+    }
+
+    /// Installs a row-scoped AppKit scroll-wheel monitor while the pointer is
+    /// hovering. Trackpad two-finger swipes arrive as scroll-wheel events on
+    /// macOS, not as SwiftUI `DragGesture` updates, so this is the reliable
+    /// path for revealing the archive action with a trackpad.
+    private func installArchiveScrollWheelMonitorIfNeeded() {
+        guard archiveScrollWheelMonitor == nil else {
+            return
+        }
+
+        archiveScrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            handleArchiveScrollWheel(event)
+        }
+    }
+
+    /// Removes the AppKit scroll-wheel monitor when the pointer leaves or the
+    /// row can no longer reveal the archive action, preventing stale rows from
+    /// consuming horizontal scroll events.
+    private func removeArchiveScrollWheelMonitor() {
+        guard let monitor = archiveScrollWheelMonitor else {
+            return
+        }
+
+        NSEvent.removeMonitor(monitor)
+        archiveScrollWheelMonitor = nil
+    }
+
+    /// Converts a horizontal trackpad scroll into the same reveal offset used
+    /// by mouse drag. Vertical-dominant events are returned untouched so normal
+    /// list scrolling keeps working.
+    /// - Parameter event: The local macOS scroll-wheel event under the hovered
+    ///   row.
+    /// - Returns: `nil` when Open Island consumes the horizontal swipe, or the
+    ///   original event when the parent scroll view should handle it.
+    private func handleArchiveScrollWheel(_ event: NSEvent) -> NSEvent? {
+        guard canRevealArchive, isHovered else {
+            return event
+        }
+
+        let horizontalTravel = abs(event.scrollingDeltaX)
+        let verticalTravel = abs(event.scrollingDeltaY)
+        guard horizontalTravel >= 1, horizontalTravel > verticalTravel * 1.2 else {
+            return event
+        }
+
+        let nextOffset = min(Self.archiveRevealWidth, archiveRevealOffset + horizontalTravel)
+        archiveRevealOffset = nextOffset
+
+        if archiveRevealOffset >= Self.archiveRevealThreshold {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.62)) {
+                archiveRevealOffset = Self.archiveRevealWidth
+            }
+        }
+
+        return nil
     }
 
     /// Hides the swipe-revealed archive action, optionally animating the row
