@@ -680,7 +680,7 @@ struct IslandPanelView: View {
                     onReply: TerminalTextSender.canReply(to: session, enabled: model.completionReplyEnabled)
                         ? { model.replyToSession(session, text: $0) } : nil,
                     onJump: { model.jumpToSession(session) },
-                    onArchive: session.phase == .completed ? { model.archiveSessionInIsland(session.id) } : nil
+                    onArchive: { model.archiveSessionInIsland(session.id) }
                 )
 
                 if model.allSessions.count > 1 {
@@ -710,7 +710,7 @@ struct IslandPanelView: View {
                         onReply: TerminalTextSender.canReply(to: session, enabled: model.completionReplyEnabled)
                             ? { model.replyToSession(session, text: $0) } : nil,
                         onJump: { model.jumpToSession(session) },
-                        onArchive: session.phase == .completed ? { model.archiveSessionInIsland(session.id) } : nil
+                        onArchive: { model.archiveSessionInIsland(session.id) }
                     )
                 }
             }
@@ -1172,12 +1172,14 @@ private struct IslandSessionRow: View {
         let presence = (rawPresence == .inactive && isManuallyExpanded) ? .active : rawPresence
         let showsExpandedContent = presence != .inactive
         return ZStack(alignment: .trailing) {
-            if canRevealArchive {
-                archiveActionLane
-            }
-
             rowCard(presence: presence, showsExpandedContent: showsExpandedContent)
                 .offset(x: canRevealArchive ? -archiveRevealOffset : 0)
+                .zIndex(0)
+
+            if canRevealArchive {
+                archiveActionLane
+                    .zIndex(1)
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
@@ -1199,10 +1201,10 @@ private struct IslandSessionRow: View {
         }
     }
 
-    /// Returns `true` only for completed rows in the opened list where the
-    /// user can deliberately reveal the local archive action with a left swipe.
+    /// Returns `true` for non-actionable rows where the user can deliberately
+    /// reveal the local-only archive action with a left swipe.
     private var canRevealArchive: Bool {
-        !isActionable && isInteractive && session.phase == .completed && onArchive != nil
+        !isActionable && isInteractive && onArchive != nil
     }
 
     /// Width of the trailing archive lane currently revealed by the swipe.
@@ -1227,6 +1229,7 @@ private struct IslandSessionRow: View {
             )
             .frame(width: Self.archiveRevealWidth, height: 44)
             .padding(.trailing, 10)
+            .offset(x: Self.archiveRevealWidth - archiveLaneWidth)
             .opacity(min(1, archiveLaneWidth / 18))
         }
     }
@@ -2539,7 +2542,7 @@ private struct ArchiveRevealButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "archivebox.fill")
+            Image(systemName: "trash.fill")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.white.opacity(isHovered ? 0.98 : 0.92))
                 .frame(width: 40, height: 40)
@@ -2555,7 +2558,8 @@ private struct ArchiveRevealButton: View {
                 .shadow(color: Color(red: 0.88, green: 0.27, blue: 0.33).opacity(0.28), radius: 12, y: 6)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Archive in Open Island")
+        .accessibilityLabel("Hide from Open Island")
+        .help("Hide from Open Island")
         .animation(.spring(response: 0.3, dampingFraction: 0.48), value: isPresented)
         .onHover { isHovered = $0 }
     }

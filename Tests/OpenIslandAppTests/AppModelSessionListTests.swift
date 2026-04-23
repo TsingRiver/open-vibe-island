@@ -324,18 +324,18 @@ struct AppModelSessionListTests {
     }
 
     @Test
-    func archivedCompletedSessionIsHiddenFromIslandBuckets() {
+    func archivedRunningSessionIsHiddenFromIslandBuckets() {
         let now = Date.now
         let model = AppModel()
 
         var archived = AgentSession(
-            id: "archived-completed",
+            id: "archived-running",
             title: "Codex · archived",
             tool: .codex,
             origin: .live,
             attachmentState: .attached,
-            phase: .completed,
-            summary: "Old lingering row.",
+            phase: .running,
+            summary: "Hidden running row.",
             updatedAt: now.addingTimeInterval(-30)
         )
         archived.isCodexAppSession = true
