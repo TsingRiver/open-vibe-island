@@ -890,9 +890,19 @@ final class NotchEventMonitors {
 // MARK: - NSScreen notch size helper
 
 extension NSScreen {
+    /// Simulated notch width used on non-notch (external) displays.
+    /// Sized close to a real MacBook notch (~200pt) so the closed island
+    /// doesn't feel disproportionately wide when the black rectangle is
+    /// fully visible (not hidden behind a physical notch).
+    static let externalDisplayNotchWidth: CGFloat = 190
+    static let externalDisplayNotchHeight: CGFloat = 38
+
     var notchSize: CGSize {
         guard safeAreaInsets.top > 0 else {
-            return CGSize(width: 224, height: 38)
+            return CGSize(
+                width: Self.externalDisplayNotchWidth,
+                height: Self.externalDisplayNotchHeight
+            )
         }
 
         let notchHeight = safeAreaInsets.top
