@@ -217,23 +217,31 @@ final class CodexAppServerCoordinator {
             ))
 
         case .turnCompleted(let threadId, let turn):
-            // A turn completing doesn't end the thread — the user can send
-            // another message.  Use activityUpdated(phase: .completed) so the
-            // session stays visible as "Completed" rather than being torn
-            // down.  `thread/closed` is the authoritative end signal.
+            // `turn/completed` is the app-server equivalent of Codex's Stop
+            // hook. It completes the current turn without ending the thread;
+            // `thread/closed` remains the authoritative full-session teardown.
             let summary: String
+            let isInterrupt: Bool
             switch turn.status {
-            case .completed: summary = "Turn completed."
-            case .interrupted: summary = "Turn interrupted."
-            case .failed: summary = "Turn failed."
-            case .inProgress: summary = "Turn in progress."
+            case .completed:
+                summary = "Turn completed."
+                isInterrupt = false
+            case .interrupted:
+                summary = "Turn interrupted."
+                isInterrupt = true
+            case .failed:
+                summary = "Turn failed."
+                isInterrupt = false
+            case .inProgress:
+                summary = "Turn in progress."
+                isInterrupt = false
             }
-            onEvent?(.activityUpdated(
-                SessionActivityUpdated(
+            onEvent?(.sessionCompleted(
+                SessionCompleted(
                     sessionID: threadId,
                     summary: summary,
-                    phase: .completed,
-                    timestamp: .now
+                    timestamp: .now,
+                    isInterrupt: isInterrupt
                 )
             ))
 

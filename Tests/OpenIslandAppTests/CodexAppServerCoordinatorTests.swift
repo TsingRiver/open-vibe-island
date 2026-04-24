@@ -54,4 +54,62 @@ struct CodexAppServerCoordinatorTests {
         #expect(payload.summary == "Idle.")
         #expect(payload.phase == .completed)
     }
+
+    /// Verifies that a normal app-server turn completion uses the same
+    /// turn-level completion event as hook-based Stop without closing the
+    /// Codex thread.
+    @Test
+    func completedTurnEmitsTurnLevelCompletionWithoutEndingThread() {
+        let coordinator = CodexAppServerCoordinator()
+        var events: [AgentEvent] = []
+        coordinator.onEvent = { events.append($0) }
+
+        coordinator.handleNotification(
+            .turnCompleted(
+                threadId: "codex-thread-3",
+                turn: CodexTurn(id: "turn-1", status: .completed)
+            )
+        )
+
+        #expect(events.count == 1)
+
+        guard case let .sessionCompleted(payload) = events[0] else {
+            Issue.record("Expected completed Codex turn to emit sessionCompleted")
+            return
+        }
+
+        #expect(payload.sessionID == "codex-thread-3")
+        #expect(payload.summary == "Turn completed.")
+        #expect(payload.isInterrupt == false)
+        #expect(payload.isSessionEnd != true)
+    }
+
+    /// Verifies that a user-initiated Codex app-server interruption is
+    /// surfaced as an interrupt completion so running state is cleared without
+    /// showing a normal completion notification.
+    @Test
+    func interruptedTurnEmitsInterruptCompletion() {
+        let coordinator = CodexAppServerCoordinator()
+        var events: [AgentEvent] = []
+        coordinator.onEvent = { events.append($0) }
+
+        coordinator.handleNotification(
+            .turnCompleted(
+                threadId: "codex-thread-4",
+                turn: CodexTurn(id: "turn-2", status: .interrupted)
+            )
+        )
+
+        #expect(events.count == 1)
+
+        guard case let .sessionCompleted(payload) = events[0] else {
+            Issue.record("Expected interrupted Codex turn to emit sessionCompleted")
+            return
+        }
+
+        #expect(payload.sessionID == "codex-thread-4")
+        #expect(payload.summary == "Turn interrupted.")
+        #expect(payload.isInterrupt == true)
+        #expect(payload.isSessionEnd != true)
+    }
 }
