@@ -839,7 +839,7 @@ struct TerminalSessionAttachmentProbeTests {
                 ),
                 codexMetadata: CodexSessionMetadata(
                     currentTool: "exec_command",
-                    currentCommandPreview: "head -5000 ControlCenterView.swift"
+                    currentCommandPreview: "head -5000 SettingsView.swift"
                 )
             ),
         ]

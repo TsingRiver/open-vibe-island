@@ -567,7 +567,7 @@ public enum CodexRolloutReducer {
         to snapshot: inout CodexRolloutSnapshot
     ) {
         switch payload["type"] as? String {
-        case "task_started":
+        case "task_started", "turn_started":
             snapshot.phase = .running
             snapshot.isCompleted = false
             snapshot.isInterrupted = false
@@ -586,7 +586,7 @@ public enum CodexRolloutReducer {
 
             applyAssistantMessage(message, timestamp: timestamp, to: &snapshot)
             return
-        case "task_complete":
+        case "task_complete", "turn_complete":
             snapshot.currentTool = nil
             snapshot.currentCommandPreview = nil
             snapshot.phase = .completed
@@ -606,20 +606,86 @@ public enum CodexRolloutReducer {
             snapshot.isCompleted = true
             snapshot.isInterrupted = true
             snapshot.summary = "Codex turn was interrupted."
+        case "agent_reasoning", "agent_reasoning_raw_content", "agent_reasoning_section_break":
+            applyThinking(to: &snapshot)
+        case "exec_command_begin":
+            applyToolActivity(
+                "exec_command",
+                preview: commandPreview(fromCommandValue: payload["command"]),
+                to: &snapshot
+            )
+        case "terminal_interaction":
+            applyToolActivity(
+                "write_stdin",
+                preview: clipped(payload["stdin"] as? String),
+                to: &snapshot
+            )
         case "exec_command_end":
-            snapshot.currentTool = nil
-            snapshot.currentCommandPreview = nil
-            if !snapshot.isCompleted {
-                snapshot.phase = .running
-            }
-            snapshot.summary = "Command finished."
+            applyThinking(to: &snapshot)
+        case "patch_apply_begin", "patch_apply_updated":
+            applyToolActivity(
+                "apply_patch",
+                preview: changesPreview(from: payload),
+                to: &snapshot
+            )
         case "patch_apply_end":
-            snapshot.currentTool = nil
-            snapshot.currentCommandPreview = nil
-            if !snapshot.isCompleted {
-                snapshot.phase = .running
+            applyThinking(to: &snapshot)
+        case "mcp_tool_call_begin":
+            if let toolName = mcpToolName(from: payload) {
+                applyToolActivity(
+                    toolName,
+                    preview: mcpToolPreview(from: payload),
+                    to: &snapshot
+                )
             }
-            snapshot.summary = "Patch applied."
+        case "mcp_tool_call_end", "dynamic_tool_call_response":
+            applyThinking(to: &snapshot)
+        case "dynamic_tool_call_request":
+            if let toolName = clipped(payload["tool"] as? String) {
+                applyToolActivity(
+                    toolName,
+                    preview: jsonPreview(from: payload["arguments"]),
+                    to: &snapshot
+                )
+            }
+        case "web_search_begin":
+            applyToolActivity("web_search", preview: nil, to: &snapshot)
+        case "web_search_end":
+            applyToolActivity(
+                "web_search",
+                preview: webSearchPreview(from: payload),
+                to: &snapshot
+            )
+        case "image_generation_begin":
+            applyToolActivity("image_generation", preview: nil, to: &snapshot)
+        case "image_generation_end":
+            applyToolActivity(
+                "image_generation",
+                preview: clipped(payload["revised_prompt"] as? String),
+                to: &snapshot
+            )
+        case "view_image_tool_call":
+            applyToolActivity(
+                "view_image",
+                preview: clipped(payload["path"] as? String),
+                to: &snapshot
+            )
+        case "plan_update":
+            applyToolActivity("update_plan", preview: nil, to: &snapshot)
+        case "request_user_input", "elicitation_request":
+            applyQuestionRequest(
+                summary: clipped(payload["prompt"] as? String)
+                    ?? clipped(payload["message"] as? String),
+                to: &snapshot
+            )
+        case "exec_approval_request", "apply_patch_approval_request", "request_permissions":
+            applyApprovalRequest(
+                summary: clipped(payload["reason"] as? String)
+                    ?? clipped(payload["message"] as? String),
+                to: &snapshot
+            )
+        case "context_compacted":
+            applyThinking(to: &snapshot)
         default:
             break
         }
@@ -634,8 +700,8 @@ public enum CodexRolloutReducer {
         timestamp: Date?,
         to snapshot: inout CodexRolloutSnapshot
     ) {
-        let itemType = payload["type"] as? String
-        if itemType == "message" {
+        switch payload["type"] as? String {
+        case "message":
             guard let role = payload["role"] as? String else {
                 return
             }
@@ -658,35 +724,112 @@ public enum CodexRolloutReducer {
             }
 
             return
-        }
-
-        guard itemType == "function_call" || itemType == "custom_tool_call" else {
-            return
-        }
-
-        guard let toolName = payload["name"] as? String, !toolName.isEmpty else {
-            return
-        }
-
-        // After task_complete, trailing response_item entries (function_call
-        // results still being flushed) should not reset the completion state.
-        guard !snapshot.isCompleted else {
-            if let timestamp {
-                snapshot.updatedAt = timestamp
+        case "reasoning":
+            applyThinking(to: &snapshot)
+        case "function_call", "custom_tool_call":
+            guard let toolName = payload["name"] as? String, !toolName.isEmpty else {
+                return
             }
+
+            applyToolActivity(
+                toolName,
+                preview: commandPreview(for: toolName, payload: payload),
+                to: &snapshot
+            )
+        case "local_shell_call":
+            applyToolActivity(
+                "exec_command",
+                preview: localShellCommandPreview(from: payload),
+                to: &snapshot
+            )
+        case "tool_search_call":
+            applyToolActivity(
+                "tool_search",
+                preview: toolSearchPreview(from: payload),
+                to: &snapshot
+            )
+        case "web_search_call":
+            applyToolActivity(
+                "web_search",
+                preview: webSearchPreview(from: payload),
+                to: &snapshot
+            )
+        case "image_generation_call":
+            applyToolActivity(
+                "image_generation",
+                preview: clipped(payload["revised_prompt"] as? String),
+                to: &snapshot
+            )
+        case "compaction", "compaction_summary", "context_compaction":
+            applyToolActivity("context_compaction", preview: nil, to: &snapshot)
+        case "function_call_output", "custom_tool_call_output", "tool_search_output":
+            applyThinking(to: &snapshot)
+        default:
             return
         }
-
-        snapshot.currentTool = toolName
-        snapshot.currentCommandPreview = commandPreview(for: toolName, payload: payload)
-        snapshot.phase = .running
-        snapshot.isCompleted = false
-        snapshot.isInterrupted = false
-        snapshot.summary = "Running \(displayName(for: toolName))."
 
         if let timestamp {
             snapshot.updatedAt = timestamp
         }
+    }
+
+    private static func applyToolActivity(
+        _ toolName: String,
+        preview: String?,
+        to snapshot: inout CodexRolloutSnapshot
+    ) {
+        // After task_complete, trailing tool lifecycle records can still be
+        // flushed into the JSONL. They may refresh updatedAt, but must not
+        // reopen the completed turn or replace the final assistant summary.
+        guard !snapshot.isCompleted else {
+            return
+        }
+
+        snapshot.currentTool = toolName
+        snapshot.currentCommandPreview = preview
+        snapshot.phase = .running
+        snapshot.isCompleted = false
+        snapshot.isInterrupted = false
+        snapshot.summary = "Running \(displayName(for: toolName))."
+    }
+
+    private static func applyThinking(to snapshot: inout CodexRolloutSnapshot) {
+        guard !snapshot.isCompleted else {
+            return
+        }
+
+        snapshot.currentTool = nil
+        snapshot.currentCommandPreview = nil
+        snapshot.phase = .running
+        snapshot.isCompleted = false
+        snapshot.isInterrupted = false
+        snapshot.summary = "Thinking."
+    }
+
+    private static func applyApprovalRequest(summary: String?, to snapshot: inout CodexRolloutSnapshot) {
+        guard !snapshot.isCompleted else {
+            return
+        }
+
+        snapshot.currentTool = nil
+        snapshot.currentCommandPreview = nil
+        snapshot.phase = .waitingForApproval
+        snapshot.isCompleted = false
+        snapshot.isInterrupted = false
+        snapshot.summary = summary ?? "Approval needed."
+    }
+
+    private static func applyQuestionRequest(summary: String?, to snapshot: inout CodexRolloutSnapshot) {
+        guard !snapshot.isCompleted else {
+            return
+        }
+
+        snapshot.currentTool = nil
+        snapshot.currentCommandPreview = nil
+        snapshot.phase = .waitingForAnswer
+        snapshot.isCompleted = false
+        snapshot.isInterrupted = false
+        snapshot.summary = summary ?? "Answer needed."
     }
 
     private static func applyUserMessage(
@@ -740,15 +883,27 @@ public enum CodexRolloutReducer {
             "patch"
         case "write_stdin":
             "input"
+        case "web_search":
+            "web search"
+        case "tool_search":
+            "tool search"
+        case "image_generation":
+            "image generation"
+        case "context_compaction":
+            "context compaction"
+        case "view_image":
+            "image"
+        case "update_plan":
+            "plan"
+        case "request_user_input":
+            "question"
         default:
-            toolName
+            readableToolName(toolName)
         }
     }
 
     private static func commandPreview(for toolName: String, payload: [String: Any]) -> String? {
-        guard let arguments = payload["arguments"] as? String,
-              let data = arguments.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let object = decodedArguments(from: payload) else {
             return nil
         }
 
@@ -757,9 +912,166 @@ public enum CodexRolloutReducer {
             return clipped(object["cmd"] as? String)
         case "write_stdin":
             return clipped(object["chars"] as? String)
+        case "view_image":
+            return clipped(object["path"] as? String)
         default:
             return nil
         }
+    }
+
+    private static func decodedArguments(from payload: [String: Any]) -> [String: Any]? {
+        if let object = payload["arguments"] as? [String: Any] {
+            return object
+        }
+
+        guard let arguments = payload["arguments"] as? String,
+              let data = arguments.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        return object
+    }
+
+    private static func localShellCommandPreview(from payload: [String: Any]) -> String? {
+        if let action = payload["action"] as? [String: Any] {
+            return commandPreview(fromCommandValue: action["command"])
+        }
+
+        return commandPreview(fromCommandValue: payload["command"])
+    }
+
+    private static func commandPreview(fromCommandValue value: Any?) -> String? {
+        if let command = value as? String {
+            return clipped(command)
+        }
+
+        if let command = value as? [String] {
+            if command.count >= 3, command[1] == "-lc" {
+                return clipped(command[2])
+            }
+            return clipped(command.joined(separator: " "))
+        }
+
+        if let command = value as? [Any] {
+            let pieces = command.compactMap { $0 as? String }
+            guard !pieces.isEmpty else {
+                return nil
+            }
+            if pieces.count >= 3, pieces[1] == "-lc" {
+                return clipped(pieces[2])
+            }
+            return clipped(pieces.joined(separator: " "))
+        }
+
+        return nil
+    }
+
+    private static func toolSearchPreview(from payload: [String: Any]) -> String? {
+        clipped(payload["execution"] as? String)
+            ?? jsonPreview(from: payload["arguments"])
+    }
+
+    private static func mcpToolName(from payload: [String: Any]) -> String? {
+        guard let invocation = payload["invocation"] as? [String: Any] else {
+            return nil
+        }
+
+        return clipped(invocation["tool"] as? String)
+    }
+
+    private static func mcpToolPreview(from payload: [String: Any]) -> String? {
+        guard let invocation = payload["invocation"] as? [String: Any] else {
+            return nil
+        }
+
+        return jsonPreview(from: invocation["arguments"])
+    }
+
+    private static func webSearchPreview(from payload: [String: Any]) -> String? {
+        if let action = payload["action"] as? [String: Any],
+           let detail = webSearchActionDetail(from: action) {
+            return detail
+        }
+
+        return clipped(payload["query"] as? String)
+    }
+
+    private static func webSearchActionDetail(from action: [String: Any]) -> String? {
+        switch action["type"] as? String {
+        case "search":
+            if let query = clipped(action["query"] as? String) {
+                return query
+            }
+
+            guard let queries = action["queries"] as? [String],
+                  let firstQuery = clipped(queries.first) else {
+                return nil
+            }
+
+            return queries.count > 1 ? "\(firstQuery) ..." : firstQuery
+        case "open_page", "openPage":
+            return clipped(action["url"] as? String)
+        case "find_in_page", "findInPage":
+            let pattern = clipped(action["pattern"] as? String)
+            let url = clipped(action["url"] as? String)
+
+            switch (pattern, url) {
+            case let (pattern?, url?):
+                return "'\(pattern)' in \(url)"
+            case let (pattern?, nil):
+                return pattern
+            case let (nil, url?):
+                return url
+            case (nil, nil):
+                return nil
+            }
+        default:
+            return nil
+        }
+    }
+
+    private static func changesPreview(from payload: [String: Any]) -> String? {
+        guard let changes = payload["changes"] as? [String: Any],
+              !changes.isEmpty else {
+            return nil
+        }
+
+        let visibleNames = changes.keys.sorted().prefix(3).map { path in
+            let lastPathComponent = URL(fileURLWithPath: path).lastPathComponent
+            return lastPathComponent.isEmpty ? path : lastPathComponent
+        }
+        let suffix = changes.count > visibleNames.count ? " ..." : ""
+        return clipped("\(visibleNames.joined(separator: ", "))\(suffix)")
+    }
+
+    private static func jsonPreview(from value: Any?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        if let string = value as? String {
+            return clipped(string)
+        }
+
+        if let number = value as? NSNumber {
+            return clipped(number.stringValue)
+        }
+
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return clipped(string)
+    }
+
+    private static func readableToolName(_ toolName: String) -> String {
+        let trimmed = toolName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutPrivatePrefix = String(trimmed.drop(while: { $0 == "_" }))
+        let readable = withoutPrivatePrefix.replacingOccurrences(of: "_", with: " ")
+        return readable.isEmpty ? toolName : readable
     }
 
     private static func responseMessageText(

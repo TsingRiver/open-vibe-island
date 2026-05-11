@@ -29,6 +29,12 @@ struct OpenIslandHooksCLI {
 
     static func main() {
         do {
+            // Allow wrappers to delegate one child process away from Open Island without changing global hook installation.
+            // 允许外部控制器只让当前子进程跳过 Open Island hook，不影响全局安装状态。
+            if HookSkipConfiguration.shouldSkipHooks(environment: ProcessInfo.processInfo.environment) {
+                return
+            }
+
             let input = FileHandle.standardInput.readDataToEndOfFile()
             guard !input.isEmpty else {
                 return

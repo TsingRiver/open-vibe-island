@@ -43,12 +43,6 @@ struct HarnessRuntimeMonitorTests {
             ),
             HarnessRuntimeEvent(
                 category: "milestone",
-                name: "controlCenterConfigured",
-                message: "hidden",
-                offsetSeconds: 0.060
-            ),
-            HarnessRuntimeEvent(
-                category: "milestone",
                 name: "bootstrapCompleted",
                 message: nil,
                 offsetSeconds: 0.070

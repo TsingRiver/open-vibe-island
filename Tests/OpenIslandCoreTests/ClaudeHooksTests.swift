@@ -377,6 +377,59 @@ struct ClaudeHooksTests {
     }
 
     @Test
+    func claudeAwaySummaryNotificationCompletesRunningSessionWhenStopWasMissed() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = BridgeServer(socketURL: socketURL)
+        try server.start()
+        defer { server.stop() }
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        let promptPayload = ClaudeHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .userPromptSubmit,
+            sessionID: "claude-away-summary",
+            transcriptPath: "/tmp/claude-away-summary.jsonl",
+            prompt: "Run the completion probe."
+        )
+        _ = try BridgeCommandClient(socketURL: socketURL).send(.processClaudeHook(promptPayload))
+
+        var iterator = stream.makeAsyncIterator()
+        let runningEvent = try await nextMatchingEvent(from: &iterator, maxEvents: 6) { event in
+            if case let .activityUpdated(payload) = event {
+                return payload.sessionID == "claude-away-summary" && payload.phase == .running
+            }
+            return false
+        }
+        if case let .activityUpdated(payload) = runningEvent {
+            #expect(payload.summary == "Prompt: Run the completion probe.")
+        }
+
+        let awaySummaryPayload = ClaudeHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .notification,
+            sessionID: "claude-away-summary",
+            transcriptPath: "/tmp/claude-away-summary.jsonl",
+            message: "Claude produced an away summary.",
+            notificationType: "away_summary"
+        )
+        _ = try BridgeCommandClient(socketURL: socketURL).send(.processClaudeHook(awaySummaryPayload))
+
+        let completedEvent = try await nextMatchingEvent(from: &iterator, maxEvents: 6) { event in
+            if case let .activityUpdated(payload) = event {
+                return payload.sessionID == "claude-away-summary" && payload.phase == .completed
+            }
+            return false
+        }
+        if case let .activityUpdated(payload) = completedEvent {
+            #expect(payload.summary == "Claude produced an away summary.")
+        }
+    }
+
+    @Test
     func questionPromptAlwaysAppendsOtherFreeformOption() throws {
         let payload = ClaudeHookPayload(
             cwd: "/tmp",
@@ -402,6 +455,24 @@ struct ClaudeHooksTests {
         #expect(options.map(\.label) == ["Production", "Staging", "Other"])
         #expect(options.last?.allowsFreeform == true)
         #expect(options.dropLast().allSatisfy { !$0.allowsFreeform })
+    }
+
+    @Test
+    func claudeNotificationSubtypeCanIdentifyAwaySummary() throws {
+        let data = Data("""
+        {
+          "cwd": "/tmp/worktree",
+          "hook_event_name": "Notification",
+          "session_id": "claude-away-summary",
+          "subtype": "away_summary",
+          "message": "Claude produced an away summary."
+        }
+        """.utf8)
+
+        let payload = try JSONDecoder().decode(ClaudeHookPayload.self, from: data)
+
+        #expect(payload.subtype == "away_summary")
+        #expect(payload.isIdleNotification)
     }
 
     @Test

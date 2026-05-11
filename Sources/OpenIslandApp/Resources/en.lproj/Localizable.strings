@@ -44,34 +44,75 @@
 "settings.general.languageChinese" = "Chinese (Simplified)";
 "settings.general.languageTraditionalChinese" = "Chinese (Traditional)";
 
-/* Settings - Appearance */
-"settings.tab.appearance" = "Appearance";
-"settings.appearance.mode" = "Mode";
-"settings.appearance.mode.default" = "Default";
-"settings.appearance.mode.custom" = "Custom";
-"settings.appearance.mode.defaultDesc" = "Use the built-in island appearance. Switch to Custom to personalize colors, glyph style, and layout.";
+/* Settings - Personalization (v6) */
+"settings.tab.appearance" = "Personalization";
 "settings.appearance.preview" = "Preview";
-"settings.appearance.preview.sessions" = "sessions";
-"settings.appearance.style" = "Style";
-"settings.appearance.closedStyle" = "Closed Style";
-"settings.appearance.style.minimal" = "Minimal";
-"settings.appearance.style.detailed" = "Detailed";
-"settings.appearance.hideIdleToEdge" = "Hide To Edge When Idle";
-"settings.appearance.hideIdleToEdge.help" = "When the island is collapsed without an active notification card, keep only a thin black edge visible. Hovering or clicking still opens it.";
-"settings.appearance.pixelShape" = "Pixel Glyph";
-"settings.appearance.pixelShape.bars" = "Cat";
-"settings.appearance.pixelShape.steps" = "Steps";
-"settings.appearance.pixelShape.blocks" = "Blocks";
-"settings.appearance.pixelShape.custom" = "Custom";
-"settings.appearance.avatar.upload" = "Upload Image";
-"settings.appearance.avatar.remove" = "Remove";
-"settings.appearance.avatar.help" = "Supports PNG, JPEG, HEIC, TIFF. Max 10 MB.";
-"settings.appearance.statusColors" = "Status Colors";
-"settings.appearance.status.running" = "Running";
-"settings.appearance.status.approval" = "Approval";
-"settings.appearance.status.answer" = "Answer";
-"settings.appearance.status.completed" = "Completed";
-"settings.appearance.communityNote" = "Much of this was built by the community.\nGot your own vibe? We'd love a PR.";
+"settings.appearance.preview.external" = "External";
+"settings.appearance.preview.macbook" = "MacBook";
+"settings.appearance.state.idle" = "idle";
+"settings.appearance.state.running" = "running";
+"settings.appearance.state.waiting" = "waiting";
+"settings.appearance.state.auto.on" = "auto ✓";
+"settings.appearance.state.auto.off" = "auto";
+"settings.appearance.rightSlot.title" = "01 · Right slot";
+"settings.appearance.rightSlot.note" = "What shows on the right of the closed island.";
+"settings.appearance.rightSlot.count" = "Count";
+"settings.appearance.rightSlot.agents" = "Agents";
+"settings.appearance.rightSlot.none" = "None";
+"settings.appearance.centerLabel.title" = "02 · Center label";
+"settings.appearance.centerLabel.note" = "External displays only — the physical notch covers this space on MacBook.";
+"settings.appearance.centerLabel.agentAction" = "Agent · action";
+"settings.appearance.centerLabel.sessionName" = "Session name";
+"settings.appearance.centerLabel.off" = "Off";
+"settings.appearance.notchPart.title" = "Notch";
+"settings.appearance.sessionListPart.title" = "Session list";
+"settings.appearance.sessionPreview" = "Preview";
+"settings.appearance.profile.title" = "Display profile";
+"settings.appearance.profile.note" = "Choose which screen type you are configuring. Open Island applies the matching profile automatically when the overlay moves.";
+"settings.appearance.profile.external.title" = "External display";
+"settings.appearance.profile.external.note" = "Top-bar fallback without the MacBook notch corners.";
+"settings.appearance.profile.macbook.title" = "MacBook notch";
+"settings.appearance.profile.macbook.note" = "Built-in notch surface with notch-aware geometry.";
+"settings.appearance.usageDisplay.title" = "02 · Usage";
+"settings.appearance.usageDisplay.note" = "Controls whether the opened island shows compact agent usage.";
+"settings.appearance.usageDisplay.hidden" = "Hidden";
+"settings.appearance.usageDisplay.compact" = "Compact";
+"settings.appearance.stateIndicator.title" = "03 · Session state";
+"settings.appearance.stateIndicator.note" = "How rows show running, waiting, and completed state.";
+"settings.appearance.stateIndicator.animatedDot" = "Animated dot";
+"settings.appearance.stateIndicator.bar" = "Bar";
+"settings.appearance.stateIndicator.glyph" = "Glyph";
+"settings.appearance.stateIndicator.tint" = "Tint";
+"settings.appearance.sessionGroup.title" = "04 · Session grouping";
+"settings.appearance.sessionGroup.note" = "Optional sections for the expanded session list.";
+"settings.appearance.sessionGroup.none" = "None";
+"settings.appearance.sessionGroup.state" = "State";
+"settings.appearance.sessionGroup.agent" = "Agent";
+"settings.appearance.sessionGroup.project" = "Project";
+"settings.appearance.sessionSort.title" = "05 · Session sorting";
+"settings.appearance.sessionSort.note" = "Choose the default order inside the expanded list.";
+"settings.appearance.sessionSort.attention" = "Attention";
+"settings.appearance.sessionSort.lastUpdate" = "Last update";
+"settings.appearance.staleThreshold.title" = "06 · Done timeout";
+"settings.appearance.staleThreshold.note" = "Completed sessions move to the low-priority idle presentation after this time.";
+"settings.appearance.staleThreshold.twoMinutes" = "2 min";
+"settings.appearance.staleThreshold.fiveMinutes" = "5 min";
+"settings.appearance.staleThreshold.tenMinutes" = "10 min";
+"settings.appearance.staleThreshold.twentyMinutes" = "20 min";
+"settings.appearance.staleThreshold.never" = "Never";
+"settings.appearance.preview.permissionNeeded" = "Permission needed";
+"settings.appearance.preview.agentEditing" = "Claude · editing";
+"settings.appearance.preview.approveShellCommand" = "Approve shell command";
+"settings.appearance.preview.promptImplementPlan" = "You: implement the plan";
+"settings.appearance.preview.waitingForAnswer" = "Waiting for answer";
+"settings.appearance.preview.promptChooseNotificationCopy" = "You: choose notification copy";
+"settings.appearance.preview.editingSessionListPreview" = "Editing session list preview";
+"settings.appearance.preview.promptTightenSettingsUI" = "You: tighten the settings UI";
+"settings.appearance.preview.replyAvailable" = "Reply available";
+"settings.appearance.preview.promptSummarizeDesignBundle" = "You: summarize the design bundle";
+"settings.appearance.preview.completedEarlier" = "Completed earlier";
+"settings.appearance.preview.permissionBody" = "$ npm run build";
+"settings.appearance.preview.pickOrTypeAnswer" = "Pick or type an answer";
 
 /* Settings - Display */
 "settings.display.monitor" = "Monitor";
@@ -137,13 +178,33 @@
 "island.terminalOwnership" = "Open Island will show live agents after terminal ownership is confirmed";
 "island.noTerminals" = "No open terminal sessions";
 "island.startAgent" = "Start a coding agent in your terminal";
-"island.recentSessions" = "Recent sessions remain in Control Center until the terminal is open again";
+"island.recentSessions" = "Recent sessions are kept here until the terminal is open again";
 "island.hint.installHooks" = "No agent hooks installed — sessions won't surface events. Tap to set up.";
 
 /* Island Panel - Session List */
+"island.sessionList.title" = "Sessions";
+"island.sessionOverview.total" = "total";
+"island.sessionOverview.waiting" = "waiting";
+"island.sessionOverview.waitingCompact" = "wait";
+"island.sessionOverview.running" = "running";
+"island.sessionOverview.runningCompact" = "run";
+"island.sessionOverview.done" = "done";
+"island.sessionOverview.idle" = "idle";
+"island.section.sessions" = "Sessions";
+"island.section.needsApproval" = "Needs approval";
+"island.section.needsAnswer" = "Needs answer";
+"island.section.inProgress" = "In progress";
+"island.section.justDone" = "Just done";
+"island.section.idle" = "Idle";
 "island.showAll" = "Show all %lld sessions";
 "island.collapseList" = "Collapse list";
 "island.usageWaiting" = "Usage waiting";
+
+/* Island Panel - Approval */
+"approval.toolPermissionRequested" = "Tool permission requested";
+"approval.deny" = "No";
+"approval.allowOnce" = "Yes";
+"approval.alwaysAllow" = "Always Allow (%@)";
 
 
 /* Island Panel - Subagents & Tasks */
@@ -155,52 +216,12 @@
 "question.submit" = "Submit Answers";
 "question.answerNeeded" = "Answer needed";
 "question.otherPlaceholder" = "Type your answer…";
+"question.sendReply" = "Send reply";
+"question.sendAnswer" = "Send answer";
 
 /* Island Panel - Completion */
 "completion.done" = "Done";
-"completion.replyPlaceholder" = "Reply to Claude…";
-
-/* Menu Bar */
-"menu.status" = "%lld live · %lld attention";
-"menu.settings" = "Settings…";
-"menu.openDebug" = "Open Debug Panel";
-"menu.hideOverlay" = "Hide Island Overlay";
-"menu.showOverlay" = "Show Island Overlay";
-"menu.refreshCodexHooks" = "Refresh Codex Hook Status";
-"menu.uninstallCodexHooks" = "Uninstall Codex Hooks";
-"menu.installCodexHooks" = "Install Codex Hooks";
-"menu.refreshClaudeHooks" = "Refresh Claude Hook Status";
-"menu.uninstallClaudeHooks" = "Uninstall Claude Hooks";
-"menu.installClaudeHooks" = "Install Claude Hooks";
-"menu.liveTool" = "Live tool: %@";
-"menu.tracking" = "Tracking: %@";
-
-/* Debug Panel */
-"debug.title" = "Open Island Debug";
-"debug.description" = "Mock-driven notch surface harness for validating session list, approval, question, and completion cards.";
-"debug.scenarios" = "Scenarios";
-"debug.actions" = "Actions";
-"debug.actionsDescription" = "The inline preview is isolated. Use the button below if you want the real top-of-screen island to mirror the current mock.";
-"debug.mirrorToIsland" = "Mirror To Island";
-"debug.closeIsland" = "Close Island";
-"debug.currentMock" = "Current Mock";
-"debug.liveOverlay" = "Live Overlay";
-"debug.inlinePreview" = "Inline Preview";
-"debug.previewDescription" = "This preview is stable and ignores live bridge activity.";
-"debug.visible" = "Visible";
-"debug.surface" = "Surface";
-"debug.sessions" = "Sessions";
-"debug.message" = "Message";
-"debug.yes" = "Yes";
-"debug.no" = "No";
-"debug.refresh" = "Refresh";
-"debug.removeHooks" = "Remove Hooks";
-"debug.installHooks" = "Install Hooks";
-"debug.removeBridge" = "Remove Bridge";
-"debug.installBridge" = "Install Bridge";
-"debug.sessionList" = "Session List";
-"debug.sessionListActionable" = "Session List (Actionable)";
+"completion.replyPlaceholder" = "Reply to %@…";
 
 /* Window Titles */
 "window.settings" = "Open Island Settings";
-"window.debug" = "Open Island Debug";

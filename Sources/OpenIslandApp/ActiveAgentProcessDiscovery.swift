@@ -242,9 +242,10 @@ struct ActiveAgentProcessDiscovery {
         let resolvedWorkingDirectory: String?
 
         if process.terminalTTY != nil {
-            // TTY-backed Codex CLI sessions still map cleanly to a single
-            // rollout file, so keep the precise session ID when available.
-            transcriptPath = matchingPath(in: lsofOutput, containing: "/.codex/sessions/", suffix: ".jsonl")
+            // TTY-backed Codex CLI sessions can keep old file descriptors open;
+            // prefer the newest rollout path so the visible row follows the
+            // current CLI session.
+            transcriptPath = bestCodexTranscriptPath(in: lsofOutput)
             sessionID = transcriptPath.flatMap(firstUUID)
             resolvedWorkingDirectory = workingDirectory(from: lsofOutput)
         } else {
@@ -289,6 +290,21 @@ struct ActiveAgentProcessDiscovery {
     private func codexHostApplication(for command: String) -> String? {
         let lowered = command.lowercased()
         return lowered.contains("/applications/codex.app/") ? "Codex" : nil
+    }
+
+    private func bestCodexTranscriptPath(in lsofOutput: String) -> String? {
+        let paths = allMatchingPaths(in: lsofOutput, containing: "/.codex/sessions/", suffix: ".jsonl")
+        guard !paths.isEmpty else {
+            return nil
+        }
+
+        return paths.max {
+            codexRolloutSortKey(for: $0) < codexRolloutSortKey(for: $1)
+        }
+    }
+
+    private func codexRolloutSortKey(for path: String) -> String {
+        URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
     }
 
     private func isClaudeSubagentWorktree(_ path: String) -> Bool {
@@ -442,13 +458,9 @@ struct ActiveAgentProcessDiscovery {
             return "Zellij"
         }
 
-        // VS Code family
-        if lowered.contains("/visual studio code.app/") || lowered.contains("/code helper") {
-            return "VS Code"
-        }
-        if lowered.contains("/visual studio code - insiders.app/") {
-            return "VS Code Insiders"
-        }
+        // VS Code family — check forks BEFORE plain VS Code so fork apps that
+        // retain the upstream "Code Helper" naming inside their Electron
+        // framework aren't misidentified as VS Code (#415).
         if lowered.contains("/cursor.app/") {
             return "Cursor"
         }
@@ -457,6 +469,18 @@ struct ActiveAgentProcessDiscovery {
         }
         if lowered.contains("/trae.app/") {
             return "Trae"
+        }
+        if lowered.contains("/qoder.app/") {
+            return "Qoder"
+        }
+        if lowered.contains("/codebuddy.app/") {
+            return "CodeBuddy"
+        }
+        if lowered.contains("/visual studio code - insiders.app/") {
+            return "VS Code Insiders"
+        }
+        if lowered.contains("/visual studio code.app/") {
+            return "VS Code"
         }
 
         // JetBrains IDEs
@@ -512,23 +536,6 @@ struct ActiveAgentProcessDiscovery {
             if value.hasPrefix("/") {
                 return value
             }
-        }
-
-        return nil
-    }
-
-    private func matchingPath(in lsofOutput: String, containing fragment: String, suffix: String) -> String? {
-        for line in lsofOutput.split(whereSeparator: \.isNewline) {
-            guard line.first == "n" else {
-                continue
-            }
-
-            let value = String(line.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard value.contains(fragment), value.hasSuffix(suffix) else {
-                continue
-            }
-
-            return value
         }
 
         return nil

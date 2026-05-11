@@ -102,7 +102,6 @@ def validate_runtime(report_path: pathlib.Path, report: dict) -> None:
         "applicationDidFinishLaunching",
         "bootstrapStarted",
         "modelStarted",
-        "controlCenterConfigured",
         "bootstrapCompleted",
         "captureScheduled",
         "captureStarted",

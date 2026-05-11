@@ -5,7 +5,32 @@ import Testing
 import OpenIslandCore
 
 @MainActor
+@Suite(.serialized)
 struct AppModelSessionListTests {
+    init() {
+        [
+            "appearance.island.v8.stateIndicator",
+            "appearance.island.v8.sessionGroup",
+            "appearance.island.v8.sessionSort",
+            "appearance.island.v8.completedStaleThreshold",
+            "appearance.island.v8.notch.rightSlot",
+            "appearance.island.v8.notch.centerLabel",
+            "appearance.island.v8.notch.stateIndicator",
+            "appearance.island.v8.notch.sessionGroup",
+            "appearance.island.v8.notch.sessionSort",
+            "appearance.island.v8.notch.completedStaleThreshold",
+            "appearance.island.v8.topBar.rightSlot",
+            "appearance.island.v8.topBar.centerLabel",
+            "appearance.island.v8.topBar.stateIndicator",
+            "appearance.island.v8.topBar.sessionGroup",
+            "appearance.island.v8.topBar.sessionSort",
+            "appearance.island.v8.topBar.completedStaleThreshold",
+            "app.suppressFrontmostNotifications",
+            "feature.completionReply.enabled",
+            "overlay.sound.muted",
+        ].forEach(UserDefaults.standard.removeObject(forKey:))
+    }
+
     @Test
     func islandListSessionsOnlyIncludeLiveAttachedSessions() {
         let now = Date(timeIntervalSince1970: 2_000)
@@ -415,6 +440,151 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func freshCompletedSessionsSortAheadOfV8StaleCompletedSessions() {
+        let now = Date()
+        let model = AppModel()
+
+        var staleCompleted = AgentSession(
+            id: "stale-completed",
+            title: "Codex · stale",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .completed,
+            summary: "Finished earlier",
+            updatedAt: now.addingTimeInterval(-301),
+            jumpTarget: JumpTarget(
+                terminalApp: "Ghostty",
+                workspaceName: "stale",
+                paneTitle: "codex ~/stale",
+                workingDirectory: "/tmp/stale",
+                terminalSessionID: "ghostty-stale"
+            )
+        )
+        staleCompleted.isProcessAlive = true
+
+        var freshCompleted = AgentSession(
+            id: "fresh-completed",
+            title: "Codex · fresh",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .completed,
+            summary: "Finished just now",
+            updatedAt: now.addingTimeInterval(-299),
+            jumpTarget: JumpTarget(
+                terminalApp: "Ghostty",
+                workspaceName: "fresh",
+                paneTitle: "codex ~/fresh",
+                workingDirectory: "/tmp/fresh",
+                terminalSessionID: "ghostty-fresh"
+            )
+        )
+        freshCompleted.isProcessAlive = true
+
+        model.state = SessionState(sessions: [staleCompleted, freshCompleted])
+
+        #expect(model.islandListSessions.map(\.id) == ["fresh-completed", "stale-completed"])
+    }
+
+    @Test
+    func islandSessionSectionsGroupStaleCompletedIntoIdle() {
+        let now = Date()
+        let model = AppModel()
+        model.islandSessionGroup = .state
+        model.completedStaleThreshold = .fiveMinutes
+
+        var approval = listSession(id: "approval", phase: .waitingForApproval, updatedAt: now)
+        approval.permissionRequest = PermissionRequest(
+            title: "Approve",
+            summary: "Run tool",
+            affectedPath: "/tmp"
+        )
+
+        var done = listSession(id: "done", phase: .completed, updatedAt: now.addingTimeInterval(-60))
+        var stale = listSession(id: "stale", phase: .completed, updatedAt: now.addingTimeInterval(-360))
+        approval.isProcessAlive = true
+        done.isProcessAlive = true
+        stale.isProcessAlive = true
+
+        model.state = SessionState(sessions: [stale, done, approval])
+
+        #expect(model.islandSessionSections.map(\.id) == ["state-approval", "state-done", "state-idle"])
+        #expect(model.islandSessionSections.map(\.sessions.first?.id) == ["approval", "done", "stale"])
+    }
+
+    @Test
+    func islandSessionSectionsKeepCompletedInDoneWhenStaleThresholdIsNever() {
+        let now = Date()
+        let model = AppModel()
+        model.islandSessionGroup = .state
+        model.completedStaleThreshold = .never
+
+        var oldDone = listSession(id: "old-done", phase: .completed, updatedAt: now.addingTimeInterval(-86_400))
+        oldDone.isProcessAlive = true
+        model.state = SessionState(sessions: [oldDone])
+
+        #expect(model.islandSessionSections.map(\.id) == ["state-done"])
+        #expect(model.islandSessionSections.first?.sessions.first?.id == "old-done")
+    }
+
+    @Test
+    func islandSessionListCanSortByLastUpdate() {
+        let now = Date()
+        let model = AppModel()
+        model.islandSessionSort = .lastUpdate
+
+        var olderRunning = listSession(id: "older-running", phase: .running, updatedAt: now.addingTimeInterval(-120))
+        var newerCompleted = listSession(id: "newer-completed", phase: .completed, updatedAt: now.addingTimeInterval(-10))
+        olderRunning.isProcessAlive = true
+        newerCompleted.isProcessAlive = true
+
+        model.state = SessionState(sessions: [olderRunning, newerCompleted])
+
+        #expect(model.islandListSessions.map(\.id) == ["newer-completed", "older-running"])
+    }
+
+    @Test
+    func islandAppearancePreferencesPersistPerDisplayProfile() {
+        let model = AppModel()
+        model.updateAppearancePreferences(for: .notch) {
+            $0.usageDisplay = .hidden
+            $0.sessionGroup = .state
+            $0.sessionStateIndicator = .bar
+            $0.completedStaleThreshold = .twoMinutes
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.usageDisplay = .compact
+            $0.sessionGroup = .project
+            $0.sessionStateIndicator = .tint
+            $0.completedStaleThreshold = .never
+        }
+
+        model.overlayPlacementDiagnostics = placementDiagnostics(mode: .notch)
+        #expect(model.islandUsageDisplay == .hidden)
+        #expect(model.islandSessionGroup == .state)
+        #expect(model.islandSessionStateIndicator == .bar)
+        #expect(model.completedStaleThreshold == .twoMinutes)
+
+        model.overlayPlacementDiagnostics = placementDiagnostics(mode: .topBar)
+        #expect(model.islandUsageDisplay == .compact)
+        #expect(model.islandSessionGroup == .project)
+        #expect(model.islandSessionStateIndicator == .tint)
+        #expect(model.completedStaleThreshold == .never)
+
+        let reloaded = AppModel()
+        reloaded.overlayPlacementDiagnostics = placementDiagnostics(mode: .notch)
+        #expect(reloaded.islandUsageDisplay == .hidden)
+        #expect(reloaded.islandSessionGroup == .state)
+        #expect(reloaded.islandSessionStateIndicator == .bar)
+        reloaded.overlayPlacementDiagnostics = placementDiagnostics(mode: .topBar)
+        #expect(reloaded.islandUsageDisplay == .compact)
+        #expect(reloaded.islandSessionGroup == .project)
+        #expect(reloaded.islandSessionStateIndicator == .tint)
+        #expect(reloaded.completedStaleThreshold == .never)
+    }
+
+    @Test
     func jumpToSessionClosesOverlayBeforeTerminalJumpFinishes() async throws {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel { _ in
@@ -724,20 +894,6 @@ struct AppModelSessionListTests {
     }
 
     @Test
-    func idleEdgeModeOnlyAppliesWhileCollapsed() {
-        let model = AppModel()
-        let originalSetting = model.hideIdleIslandToEdge
-        defer { model.hideIdleIslandToEdge = originalSetting }
-        model.hideIdleIslandToEdge = true
-
-        model.notchStatus = .closed
-        #expect(model.showsIdleEdgeWhenCollapsed)
-
-        model.notchStatus = .opened
-        #expect(!model.showsIdleEdgeWhenCollapsed)
-    }
-
-    @Test
     func completionNotificationRequiresSurfaceEntryBeforePointerExitCollapse() {
         let model = AppModel()
         // Add a completed session so autoDismissesWhenPresentedAsNotification can check phase
@@ -775,6 +931,73 @@ struct AppModelSessionListTests {
 
         #expect(model.notchStatus == .closed)
         #expect(model.notchOpenReason == nil)
+    }
+
+    @Test
+    func completionNotificationDefersTimedCollapseWhilePointerIsInside() {
+        let model = AppModel()
+        model.applyTrackedEvent(
+            .sessionStarted(SessionStarted(
+                sessionID: "session-1",
+                title: "Test",
+                tool: .codex,
+                summary: "Done",
+                timestamp: .now
+            )),
+            updateLastActionMessage: false
+        )
+        model.applyTrackedEvent(
+            .sessionCompleted(SessionCompleted(
+                sessionID: "session-1",
+                summary: "Done",
+                timestamp: .now
+            )),
+            updateLastActionMessage: false
+        )
+        model.notchStatus = .opened
+        model.notchOpenReason = .notification
+        model.islandSurface = .sessionList(actionableSessionID: "session-1")
+
+        #expect(model.shouldAutoCollapseOnMouseLeave)
+        #expect(!model.shouldDeferTimedNotificationAutoCollapse)
+
+        model.notePointerInsideIslandSurface()
+
+        #expect(model.shouldDeferTimedNotificationAutoCollapse)
+
+        model.handlePointerExitedIslandSurface()
+
+        #expect(model.notchStatus == .closed)
+        #expect(model.notchOpenReason == nil)
+    }
+
+    @Test
+    func completionNotificationHoverCancelsPendingTimedCollapse() {
+        let model = AppModel()
+        model.state = SessionState(
+            sessions: [
+                AgentSession(
+                    id: "session-1",
+                    title: "Test",
+                    tool: .codex,
+                    attachmentState: .attached,
+                    phase: .completed,
+                    summary: "Done",
+                    updatedAt: .now
+                )
+            ]
+        )
+
+        model.notchOpen(reason: .notification, surface: .sessionList(actionableSessionID: "session-1"))
+
+        #expect(model.hasPendingNotificationAutoCollapse)
+
+        model.notePointerInsideIslandSurface()
+
+        #expect(!model.hasPendingNotificationAutoCollapse)
+        #expect(model.shouldDeferTimedNotificationAutoCollapse)
+        #expect(model.notchStatus == .opened)
+        #expect(model.notchOpenReason == .notification)
     }
 
     @Test
@@ -1032,6 +1255,114 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    @MainActor
+    func notificationMeasuredHeightClearedWhenSameSessionCardContentChanges() {
+        let model = AppModel()
+        model.isSoundMuted = true
+
+        var session = AgentSession(
+            id: "same-session",
+            title: "Codex · proj",
+            tool: .codex,
+            attachmentState: .attached,
+            phase: .waitingForApproval,
+            summary: "Approve edit",
+            updatedAt: .now,
+            permissionRequest: PermissionRequest(
+                title: "Edit",
+                summary: "A longer approval card",
+                affectedPath: "/tmp/long-file-name.swift"
+            )
+        )
+        session.isProcessAlive = true
+        session.phase = .completed
+        session.permissionRequest = nil
+        session.summary = "Done"
+        model.state = SessionState(sessions: [session])
+
+        let surface = IslandSurface.sessionList(actionableSessionID: "same-session")
+        model.notchStatus = .opened
+        model.notchOpenReason = .notification
+        model.islandSurface = surface
+        model.measuredNotificationContentHeight = 360
+
+        model.overlay.presentNotificationSurface(surface)
+
+        #expect(model.notchStatus == .opened)
+        #expect(model.notchOpenReason == .notification)
+        #expect(model.islandSurface == surface)
+        #expect(model.activeIslandCardSession?.phase == .completed)
+        #expect(
+            model.measuredNotificationContentHeight == 0,
+            "Replacing a notification with different content for the same session must discard the previous card's measured height."
+        )
+    }
+
+    @Test
+    @MainActor
+    func hoveredNotificationCardIsNotReplacedByAnotherNotification() {
+        let model = AppModel()
+        model.isSoundMuted = true
+
+        var currentSession = AgentSession(
+            id: "current-session",
+            title: "Claude · current",
+            tool: .claudeCode,
+            attachmentState: .attached,
+            phase: .waitingForApproval,
+            summary: "Approve current edit",
+            updatedAt: .now,
+            permissionRequest: PermissionRequest(
+                title: "Edit",
+                summary: "current.swift",
+                affectedPath: "/tmp/current.swift"
+            )
+        )
+        currentSession.isProcessAlive = true
+
+        var incomingSession = AgentSession(
+            id: "incoming-session",
+            title: "Codex · incoming",
+            tool: .codex,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Working",
+            updatedAt: .now
+        )
+        incomingSession.isProcessAlive = true
+
+        let currentSurface = IslandSurface.sessionList(actionableSessionID: "current-session")
+        model.state = SessionState(sessions: [currentSession, incomingSession])
+        model.notchStatus = .opened
+        model.notchOpenReason = .notification
+        model.islandSurface = currentSurface
+        model.measuredNotificationContentHeight = 280
+
+        model.notePointerInsideIslandSurface()
+
+        model.applyTrackedEvent(
+            .permissionRequested(PermissionRequested(
+                sessionID: "incoming-session",
+                request: PermissionRequest(
+                    title: "Edit",
+                    summary: "incoming.swift",
+                    affectedPath: "/tmp/incoming.swift"
+                ),
+                timestamp: .now
+            )),
+            updateLastActionMessage: false,
+            ingress: .bridge
+        )
+
+        #expect(model.state.session(id: "incoming-session")?.phase == .waitingForApproval)
+        #expect(model.notchStatus == .opened)
+        #expect(model.notchOpenReason == .notification)
+        #expect(model.islandSurface == currentSurface)
+        #expect(model.activeIslandCardSession?.id == "current-session")
+        #expect(model.measuredNotificationContentHeight == 280)
+    }
+
+    @Test
     func recoveredSessionMatchesLiveGhosttyProcessByCWDWhenMultipleCandidatesExist() {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel()
@@ -1128,5 +1459,38 @@ struct AppModelSessionListTests {
         model.showSettings()
 
         #expect(openCount == 1)
+    }
+
+    private func listSession(id: String, phase: SessionPhase, updatedAt: Date) -> AgentSession {
+        AgentSession(
+            id: id,
+            title: "Codex · \(id)",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: phase,
+            summary: phase.displayName,
+            updatedAt: updatedAt,
+            jumpTarget: JumpTarget(
+                terminalApp: "Ghostty",
+                workspaceName: id,
+                paneTitle: "codex ~/\(id)",
+                workingDirectory: "/tmp/\(id)",
+                terminalSessionID: "ghostty-\(id)"
+            )
+        )
+    }
+
+    private func placementDiagnostics(mode: OverlayPlacementMode) -> OverlayPlacementDiagnostics {
+        OverlayPlacementDiagnostics(
+            targetScreenID: mode == .notch ? "display-notch" : "display-topbar",
+            targetScreenName: mode == .notch ? "Built-in Display" : "External Display",
+            selectionSummary: "test",
+            mode: mode,
+            screenFrame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 944),
+            safeAreaInsets: NSEdgeInsets(top: mode == .notch ? 37 : 0, left: 0, bottom: 0, right: 0),
+            overlayFrame: NSRect(x: 400, y: 820, width: 700, height: 160)
+        )
     }
 }

@@ -132,9 +132,9 @@ private struct SetupCommand {
         print("Codex dir: \(status.codexDirectory.path)")
         print("Hooks binary: \(hooksBinary.path)")
         if status.manifest?.enabledCodexHooksFeature == true {
-            print("Updated config.toml to enable [features].codex_hooks = true")
+            print("Updated config.toml to enable Codex hooks")
         } else {
-            print("config.toml already had codex_hooks enabled")
+            print("config.toml already had Codex hooks enabled")
         }
     }
 

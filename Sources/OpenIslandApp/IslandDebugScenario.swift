@@ -242,7 +242,7 @@ private enum DebugSessionFactory {
                 lastUserPrompt: "之前也有错误的改动吧 你应该重新改",
                 lastAssistantMessage: "读取现有 notch 状态与事件路由，准备把提醒态从 session list 里拆出来。",
                 currentTool: "exec_command",
-                currentCommandPreview: "sed -n '1,260p' Sources/OpenIslandApp/Views/ControlCenterView.swift"
+                currentCommandPreview: "sed -n '1,260p' Sources/OpenIslandApp/Views/SettingsView.swift"
             )
         )
     }
@@ -313,12 +313,12 @@ private enum DebugSessionFactory {
             origin: .demo,
             attachmentState: .attached,
             phase: .waitingForApproval,
-            summary: "Allow exec_command to rewrite ControlCenterView.swift?",
+            summary: "Allow exec_command to rewrite SettingsView.swift?",
             updatedAt: now.addingTimeInterval(-20),
             permissionRequest: PermissionRequest(
                 title: "Approve file rewrite",
-                summary: "Allow exec_command to rewrite ControlCenterView.swift?",
-                affectedPath: "Sources/OpenIslandApp/Views/ControlCenterView.swift",
+                summary: "Allow exec_command to rewrite SettingsView.swift?",
+                affectedPath: "Sources/OpenIslandApp/Views/SettingsView.swift",
                 primaryActionTitle: "Allow",
                 secondaryActionTitle: "Deny"
             ),

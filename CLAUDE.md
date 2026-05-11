@@ -1,144 +1,85 @@
 # CLAUDE.md
 
-## What is this project?
+## Project
 
-Open Island is a native macOS companion app for AI coding agents. It sits in the notch/top-bar area and monitors local agent sessions, surfaces permission requests, answers questions, and provides "jump back" to the correct terminal context. Local-first, no server dependency.
+Open Island — native macOS companion for AI coding agents. Sits in the notch / top bar, monitors local sessions, surfaces permission and question events, and jumps back to the right terminal/IDE. Local-first, no server.
 
-## References
-
-- **Target product**: https://vibeisland.app/ — the commercial product we are building toward feature parity with
-- **Reference OSS repo**: https://github.com/farouqaldori/claude-island — open-source implementation we can study for design patterns and ideas
+- **Target product** (closed-source baseline): https://vibeisland.app/
+- **OSS reference** (design ideas only, not a spec): https://github.com/farouqaldori/claude-island
 
 ## Architecture
 
-Four targets in one Swift package (`OpenIsland`):
+One Swift package (`OpenIsland`), four targets:
 
-1. **OpenIslandApp** — SwiftUI + AppKit shell. Menu bar extra, overlay panel (notch/top-bar), and control center window. Entry point: `OpenIslandApp.swift` with `AppModel` as the central `@Observable` state owner.
-2. **OpenIslandCore** — Shared library. Models (`AgentSession`, `AgentEvent`, `SessionState`), bridge transport (Unix socket IPC with JSON line protocol), hook models/installers for both Codex and Claude Code, transcript discovery, session persistence/registry.
-3. **OpenIslandHooks** — Lightweight CLI executable invoked by agent hooks. Reads hook payload from stdin, forwards to app bridge via Unix socket, writes blocking JSON to stdout only when island denies a `PreToolUse`.
-4. **OpenIslandSetup** — Installer CLI for managing `~/.codex/config.toml` and `hooks.json`.
+- **OpenIslandApp** — SwiftUI + AppKit shell. `AppModel` owns state.
+- **OpenIslandCore** — Models, bridge transport (Unix socket, NDJSON), hook installers, session discovery & registry.
+- **OpenIslandHooks** — CLI invoked by agent hooks. Forwards stdin payload → bridge.
+- **OpenIslandSetup** — Installer CLI for agent config files.
 
-## Key data flow
+Data flow: `agent hook → OpenIslandHooks (stdin) → Unix socket → BridgeServer → AppModel → UI`. On launch: registry restore → JSONL transcript discovery → reconcile with active processes → live bridge.
 
-### Codex path
-Codex → hooks.json → OpenIslandHooks (stdin/stdout) → Unix socket → BridgeServer → AppModel → UI
+Requires macOS 14+, Swift 6.2.
 
-### Claude Code path
-Claude Code → settings.json hooks → OpenIslandHooks (stdin/stdout) → Unix socket → BridgeServer.handleClaudeHook → AppModel → UI
-
-### Session discovery (on launch)
-Restore cached sessions from registry → discover recent JSONL transcripts (`~/.claude/projects/`) → reconcile with active terminal processes → start live bridge.
-
-## Supported scope (narrow by design)
-
-- **Agents**: Claude Code, Codex, OpenCode, Cursor, Qoder, Qwen Code, Factory, CodeBuddy
-- **Terminals**: Terminal.app, Ghostty, iTerm2, WezTerm, cmux, Kaku, Zellij; tmux (multiplexer)
-- **IDE workspace jump**: VS Code, Cursor, Windsurf, Trae, JetBrains IDEs
-- Do NOT expand scope unless explicitly asked
-
-## Build & test
+## Build & run
 
 ```bash
 swift build
 swift test
-swift run OpenIslandApp                            # run the app
-swift build -c release --product OpenIslandHooks   # build hook binary
+swift run OpenIslandApp                            # canonical dev runtime
+swift build -c release --product OpenIslandHooks
 ```
 
-Open `Package.swift` in Xcode for the app target. Requires macOS 14+, Swift 6.2.
+For Xcode: open `Package.swift`.
 
-## Required Workflow
+## Dev app (Open Island Dev.app)
 
-> **⚠️ NEVER edit files directly in the main worktree.** Use `EnterWorktree` or `git worktree` to work in an isolated copy.
+`~/Applications/Open Island Dev.app` is a wrapper around the repo build, not a separate product.
 
-1. Start each round by checking the current repository state with `git status -sb`.
-2. **Enter a worktree** before making any edits — use `EnterWorktree` (preferred) or `git worktree add` to create an isolated working copy based on `main`.
-3. Read the relevant files before editing. Do not guess repository structure or behavior.
-4. Keep each round focused on a single coherent change.
-5. After making changes, run the most relevant verification available for that round.
-6. Summarize what changed, including any verification gaps.
-7. Commit, push to remote, exit the worktree (`ExitWorktree`), and create a PR to merge into `main`.
+- **Launch**: `zsh scripts/launch-dev-app.sh` — never just `open -na`, the bundle goes stale.
+- **One-time signing**: `zsh scripts/setup-dev-signing.sh` — without this every rebuild changes cdhash and silently invalidates TCC grants (Accessibility, Automation). Required for any AX-touching feature (precision jump, keystroke/menu injection).
+- `scripts/harness.sh smoke` / `scripts/smoke-dev-app.sh` are for deterministic harness runs only.
 
-## Commit Policy
+## Workflow
 
-- Every round that modifies files must end with a commit.
-- Do not batch unrelated changes into one commit.
-- Use conventional-style commit messages: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`.
-- Do not amend existing commits unless explicitly requested.
-- Create a feature branch (e.g. `fix/<topic>`, `feat/<topic>`) for every independent change. Do not commit directly to `main`.
+- **Never edit in the main worktree.** Use `EnterWorktree` (preferred) or `git worktree add`, branched off latest local `main`.
+- Branch name matches topic: `feat/<topic>`, `fix/<topic>`. One coherent change per round.
+- `main` is protected — direct push is rejected. All changes ship via PR **targeting `main`**. No chain PRs (A → B → main) — wait for the dependency to merge, then rebase.
+- Conventional commit messages (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`). Never `--amend` unless asked.
+- After changes: run the matching verification (`swift build` / `swift test` / manual). If no check exists, say so in the summary and still commit.
+- Never `git reset --hard`, force-push, or overwrite user changes without explicit approval. If unexpected state appears, inspect — don't bulldoze.
 
-## Safety Rules
+## Scope guardrails
 
-- Never revert or overwrite user changes unless explicitly requested.
-- If unexpected changes appear, inspect them and work around them when possible.
-- If a conflict makes the task ambiguous or risky, stop and ask before proceeding.
-- Never use destructive Git commands such as `git reset --hard` without explicit approval.
+Current support matrix (agents / terminals / IDEs) lives in `README.md` — that's the single source of truth, keep it accurate at release time.
 
-## Branching Rules
+The project is past MVP and welcomes new ideas and creative directions, but the following stay off-limits without an explicit ask:
 
-- `main` is a protected branch (GitHub branch protection enabled). **NEVER commit or push directly to `main`.**
-- All changes MUST go through a Pull Request to merge into `main`. Direct pushes are rejected.
-- All feature branches must be created from the latest local `main`.
-- Each agent or workstream should work on its own branch, named to match the topic (e.g. `feat/<topic>`, `fix/<topic>`).
-- Standard flow: **EnterWorktree → develop → commit → push → ExitWorktree → create PR → merge**.
-- For parallel Agent sub-tasks, use `Agent(isolation: "worktree")` to give each agent its own isolated copy.
-- **All PRs MUST target `main` as base branch.** Never target another feature branch. Chain PRs (A → B → main) are prohibited — they cause silent change loss when merge order is wrong. If work depends on an unmerged branch, wait for it to merge to main first, then rebase.
+- Analytics or telemetry SDKs (Mixpanel etc.)
+- Window-manager dependencies (`yabai` etc.)
+- Claude-only assumptions that weaken the multi-agent model
+- Anything that breaks local-first (remote-server dependencies, cloud-only paths)
 
-## Release Policy
+## Release
 
-- **Bilingual required**: Every release MUST include both English and Chinese (Simplified) descriptions. Use the template in `.github/RELEASE_TEMPLATE.md`.
-- Before creating a release, fetch remote `main` and review ALL merged PRs since the last tag to avoid missing changes.
-- Each changelog entry follows the format: `- **Category**: English description (#PR)\n  中文描述 (#PR)`. For external contributors, append `— Thanks @username` to the English line.
-- The release title follows: `Open Island vX.Y.Z — Short English Title`
-- The Installation section must be bilingual.
-- Release is triggered by pushing a `v*` tag to `main`. The GitHub Actions workflow builds, signs, notarizes, and publishes the DMG automatically.
-
-## App Targets And Naming
-
-- `OpenIslandApp` (via `swift run OpenIslandApp` or the Xcode target) is the canonical development runtime.
-- `~/Applications/Open Island Dev.app` is a local bundle wrapper around the repo-built binary, not a separate product.
-- When launching `Open Island Dev.app`, refresh the bundle first with `zsh scripts/launch-dev-app.sh` instead of only `open -na` (avoids stale binaries).
-- **One-time setup**: run `zsh scripts/setup-dev-signing.sh` once to create a local self-signed code signing identity. Without it the dev bundle is ad-hoc signed, which changes cdhash every rebuild and silently invalidates any macOS TCC grant (Accessibility, Automation) you gave the previous build. Required when iterating on features that touch AX API (precision jump, keystroke/menu injection, etc.).
-- Use `scripts/harness.sh smoke` or `scripts/smoke-dev-app.sh` only for deterministic harness runs.
-- `/Applications/Vibe Island.app` and `https://vibeisland.app/` are closed-source reference baselines only — behavior benchmarks, not the development runtime.
-
-## Reference Baselines
-
-- Official product reference: `https://vibeisland.app/`
-- On Macs with a built-in notch, the island sits in the notch area; on external displays or non-notch Macs, it falls back to a compact top-center bar.
-- Community reference: `https://github.com/farouqaldori/claude-island` — useful for design patterns, not a product spec.
-- Do NOT import from `claude-island` unless explicitly asked: analytics (Mixpanel etc.), window-manager scope (`yabai`), Claude-only assumptions that weaken the shared agent model, raising the support boundary beyond the surfaces already listed.
+- Triggered by pushing a `v*` tag to `main`. CI builds, signs, notarizes, publishes the DMG. Don't create the GitHub release manually — edit the draft CI produces.
+- Before tagging: `git fetch origin main` and review every merged PR since the last tag. Don't trust memory.
+- Bilingual required (English + 简体中文). Template: `.github/RELEASE_TEMPLATE.md`. Entry format: `- **Category**: English (#PR)\n  中文 (#PR)`. External contributors get `— Thanks @user` on the English line.
+- Title: `Open Island vX.Y.Z — Short English Title`. Installation section bilingual.
 
 ## Conventions
 
-- Prefer small end-to-end slices over speculative scaffolding
-- Native macOS APIs over cross-platform abstractions
-- Hooks fail open — if app/bridge unavailable, agents keep running unchanged
-- The `SessionState.apply(_:)` reducer is the single source of truth for session mutations
-- Bridge protocol uses newline-delimited JSON envelopes (`BridgeCodec`)
-- All models are `Sendable` and `Codable`
+- `SessionState.apply(_:)` is the single source of truth for session mutations.
+- Bridge protocol: newline-delimited JSON envelopes (`BridgeCodec`).
+- All models `Sendable` + `Codable`.
+- Hooks **fail open** — if app/bridge is down, the agent runs unchanged.
+- Native macOS APIs over cross-platform abstractions. Small end-to-end slices over speculative scaffolding.
 
-## Verification
+## Key files
 
-- Run targeted checks that match the change (`swift build`, `swift test`, or manual verification).
-- If no automated verification exists yet, state that explicitly in the summary and still commit.
-
-## Important files
-
-- `Sources/OpenIslandApp/AppModel.swift` — Central app state, session management, bridge lifecycle
-- `Sources/OpenIslandApp/TerminalSessionAttachmentProbe.swift` — Ghostty/Terminal attachment matching
-- `Sources/OpenIslandApp/ActiveAgentProcessDiscovery.swift` — Process discovery via ps/lsof
-- `Sources/OpenIslandCore/SessionState.swift` — Pure state reducer for agent sessions
-- `Sources/OpenIslandCore/AgentSession.swift` — Core session model and related types
-- `Sources/OpenIslandCore/AgentEvent.swift` — Event enum driving all state transitions
-- `Sources/OpenIslandCore/BridgeTransport.swift` — Unix socket protocol, codec, envelope types
-- `Sources/OpenIslandCore/BridgeServer.swift` — Bridge server handling hook payloads
-- `Sources/OpenIslandCore/ClaudeHooks.swift` — Claude Code hook payload model and terminal detection
-- `Sources/OpenIslandCore/ClaudeTranscriptDiscovery.swift` — Discovers sessions from `~/.claude/projects/` JSONL files
-- `Sources/OpenIslandCore/ClaudeSessionRegistry.swift` — Persists/restores Claude sessions across app launches
-- `Sources/OpenIslandCore/CodexHooks.swift` — Codex hook payload model
-- `Sources/OpenIslandHooks/main.swift` — Hook CLI entry point
-- `Sources/OpenIslandApp/OverlayPanelController.swift` — Notch/top-bar overlay window
-- `docs/product.md` — Product scope and MVP boundary
-- `docs/architecture.md` — System design and engineering decisions
-- `AGENTS.md` — Working agreement for agent workflow
+- `Sources/OpenIslandApp/AppModel.swift` — central state, session management, bridge lifecycle
+- `Sources/OpenIslandCore/SessionState.swift` — pure reducer
+- `Sources/OpenIslandCore/AgentEvent.swift` — event enum driving all transitions
+- `Sources/OpenIslandCore/BridgeTransport.swift` + `BridgeServer.swift` — socket protocol & dispatch
+- `Sources/OpenIslandCore/{Claude,Codex,Gemini,Kimi,Cursor}Hooks.swift` etc. — per-agent hook payload models
+- `Sources/OpenIslandHooks/main.swift` — hook CLI entry
+- `docs/product.md`, `docs/architecture.md`, `AGENTS.md` — design / working-agreement docs

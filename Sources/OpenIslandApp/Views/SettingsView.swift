@@ -172,14 +172,15 @@ struct SettingsView: View {
 struct GeneralSettingsPane: View {
     var model: AppModel
 
-    @State private var launchAtLogin = false
-
     private var lang: LanguageManager { model.lang }
 
     var body: some View {
         Form {
             Section(lang.t("settings.section.system")) {
-                Toggle(lang.t("settings.general.launchAtLogin"), isOn: $launchAtLogin)
+                Toggle(lang.t("settings.general.launchAtLogin"), isOn: Binding(
+                    get: { model.launchAtLoginEnabled },
+                    set: { model.launchAtLoginEnabled = $0 }
+                ))
 
                 Picker(lang.t("settings.general.monitor"), selection: Binding(
                     get: { model.overlayDisplaySelectionID },

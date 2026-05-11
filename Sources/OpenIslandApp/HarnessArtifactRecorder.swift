@@ -77,7 +77,6 @@ struct HarnessArtifactReport: Codable {
 
     let scenario: String?
     let presentOverlay: Bool
-    let showedControlCenter: Bool
     let startedBridge: Bool
     let performedBootAnimation: Bool
     let capturedAt: Date
@@ -154,7 +153,6 @@ enum HarnessArtifactRecorder {
         let report = HarnessArtifactReport(
             scenario: configuration.scenario?.rawValue,
             presentOverlay: configuration.presentOverlay,
-            showedControlCenter: configuration.shouldShowControlCenter,
             startedBridge: configuration.shouldStartBridge,
             performedBootAnimation: configuration.shouldPerformBootAnimation,
             capturedAt: .now,
@@ -221,8 +219,6 @@ enum HarnessArtifactRecorder {
         switch recognizedWindowKind(for: window) ?? "window" {
         case "overlay":
             baseName = "overlay"
-        case "control-center":
-            baseName = "control-center"
         default:
             baseName = "window-\(ordinal)"
         }
@@ -235,8 +231,6 @@ enum HarnessArtifactRecorder {
         switch recognizedWindowKind(for: window) ?? "window" {
         case "overlay":
             baseName = "overlay"
-        case "control-center":
-            baseName = "control-center"
         default:
             baseName = "window-\(ordinal)"
         }
@@ -251,10 +245,6 @@ enum HarnessArtifactRecorder {
     private static func recognizedWindowKind(for window: NSWindow) -> String? {
         if window is NSPanel {
             return window.frame.width >= 120 ? "overlay" : nil
-        }
-
-        if window.title == "Open Island Debug" {
-            return "control-center"
         }
 
         return nil

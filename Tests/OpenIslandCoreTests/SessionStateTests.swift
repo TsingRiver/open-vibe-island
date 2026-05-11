@@ -461,6 +461,67 @@ struct SessionStateTests {
     }
 
     @Test
+    func openCodeQuestionAskedCarriesStructuredOptionsUntilAnswered() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = BridgeServer(socketURL: socketURL)
+        try server.start()
+        defer { server.stop() }
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        let payload = OpenCodeHookPayload(
+            hookEventName: .questionAsked,
+            sessionID: "opencode-question-1",
+            cwd: "/tmp/worktree",
+            questionID: "question-1",
+            questionText: "Which notification treatment should this session use?",
+            questions: [
+                OpenCodeQuestionPayload(
+                    question: "Which notification treatment should this session use?",
+                    header: "Notification",
+                    options: [
+                        OpenCodeQuestionOptionPayload(
+                            label: "Inline choices",
+                            description: "Answer directly in the island"
+                        ),
+                        OpenCodeQuestionOptionPayload(
+                            label: "Jump back",
+                            description: "Return to the terminal first"
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        async let responseTask = sendOnGCDThread(.processOpenCodeHook(payload), socketURL: socketURL)
+
+        var iterator = stream.makeAsyncIterator()
+        let startedEvent = try await nextEvent(from: &iterator)
+        let questionEvent = try await nextEvent(from: &iterator)
+
+        #expect(startedEvent.isSessionStarted)
+        #expect(questionEvent.questionPrompt?.questions.first?.question == "Which notification treatment should this session use?")
+        #expect(questionEvent.questionPrompt?.questions.first?.options.map(\.label) == ["Inline choices", "Jump back"])
+        #expect(questionEvent.questionPrompt?.questions.first?.options.first?.description == "Answer directly in the island")
+
+        try await observer.send(
+            .answerQuestion(
+                sessionID: "opencode-question-1",
+                response: QuestionPromptResponse(answer: "Inline choices")
+            )
+        )
+
+        let activityEvent = try await nextEvent(from: &iterator)
+        let response = try await responseTask
+
+        #expect(activityEvent.activityUpdate?.summary == "Answered: Inline choices")
+        #expect(response == .openCodeHookDirective(.answer(text: "Inline choices")))
+    }
+
+    @Test
     func codexPreToolUseWaitsForApprovalAndReturnsDenyDirective() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = BridgeServer(socketURL: socketURL)
@@ -869,11 +930,101 @@ struct SessionStateTests {
         #expect(enabled.changed)
         #expect(enabled.featureEnabledByInstaller)
         #expect(enabled.contents.contains("[features]"))
-        #expect(enabled.contents.contains("codex_hooks = true"))
+        #expect(enabled.contents.contains("hooks = true"))
+        #expect(!enabled.contents.contains("codex_hooks = true"))
 
         let removed = CodexHookInstaller.disableCodexHooksFeatureIfManaged(in: enabled.contents)
         #expect(removed.changed)
-        #expect(!removed.contents.contains("codex_hooks = true"))
+        #expect(!removed.contents.contains("hooks = true"))
+    }
+
+    @Test
+    func codexHookInstallerMigratesLegacyFeatureFlag() {
+        let legacyConfig = """
+        [features]
+        codex_hooks = true
+        """
+
+        let enabled = CodexHookInstaller.enableCodexHooksFeature(in: legacyConfig)
+        #expect(enabled.changed)
+        #expect(!enabled.featureEnabledByInstaller)
+        #expect(enabled.contents.contains("hooks = true"))
+        #expect(!enabled.contents.contains("codex_hooks = true"))
+    }
+
+    @Test
+    func codexHookInstallerCanUseLegacyFeatureFlagForOlderCodex() {
+        let initialConfig = """
+        model = "gpt-5-codex"
+        """
+
+        let enabled = CodexHookInstaller.enableCodexHooksFeature(in: initialConfig, preferredKey: .legacy)
+        #expect(enabled.changed)
+        #expect(enabled.featureEnabledByInstaller)
+        #expect(enabled.contents.contains("[features]"))
+        let enabledLines = enabled.contents.components(separatedBy: "\n")
+        #expect(enabledLines.contains("codex_hooks = true"))
+        #expect(!enabledLines.contains("hooks = true"))
+    }
+
+    @Test
+    func codexHookInstallerRemovesLegacyFlagWhenCurrentFlagExists() {
+        let mixedConfig = """
+        [features]
+        hooks = true
+        codex_hooks = true
+        """
+
+        let enabled = CodexHookInstaller.enableCodexHooksFeature(in: mixedConfig)
+        #expect(enabled.changed)
+        #expect(!enabled.featureEnabledByInstaller)
+        #expect(enabled.contents.contains("hooks = true"))
+        #expect(!enabled.contents.contains("codex_hooks = true"))
+    }
+
+    @Test
+    func codexHookInstallerRecognizesCurrentAndLegacyFeatureFlags() {
+        #expect(CodexHookInstaller.isCodexHooksFeatureEnabled(in: """
+        [features]
+        hooks = true
+        """))
+
+        #expect(CodexHookInstaller.isCodexHooksFeatureEnabled(in: """
+        [features]
+        hooks=true # enabled by user
+        """))
+
+        #expect(CodexHookInstaller.isCodexHooksFeatureEnabled(in: """
+        [features]
+        codex_hooks = true
+        """))
+
+        #expect(CodexHookInstaller.isCodexHooksFeatureEnabled(in: """
+        [features]
+        codex_hooks=true # legacy enabled by user
+        """))
+
+        #expect(!CodexHookInstaller.isCodexHooksFeatureEnabled(in: """
+        [features]
+        hooks=false # disabled by user
+        """))
+    }
+
+    @Test
+    func codexHookInstallerDetectsPreferredFeatureFlagFromCodexOutput() {
+        let currentFeatures = """
+        plugin_hooks  under development  false
+        hooks         stable             true
+        """
+        let legacyFeatures = """
+        codex_hooks   stable             true
+        shell_tool    stable             true
+        """
+
+        #expect(CodexHookInstaller.preferredCodexHooksFeatureKey(fromFeatureList: currentFeatures) == .current)
+        #expect(CodexHookInstaller.preferredCodexHooksFeatureKey(fromFeatureList: legacyFeatures) == .legacy)
+        #expect(CodexHookInstaller.preferredCodexHooksFeatureKey(fromVersionOutput: "codex-cli 0.130.0") == .current)
+        #expect(CodexHookInstaller.preferredCodexHooksFeatureKey(fromVersionOutput: "codex-cli 0.129.0") == .legacy)
     }
 
     @Test
@@ -1035,6 +1186,84 @@ struct SessionStateTests {
         """.data(using: .utf8)!
         let legacy = try JSONDecoder().decode(JumpTarget.self, from: legacyJSON)
         #expect(legacy.warpPaneUUID == nil)
+    }
+
+    @Test
+    func firstSeenAtIsWrittenOnceAndPreservedAcrossSubsequentEvents() {
+        let t0 = Date(timeIntervalSince1970: 10_000)
+        var state = SessionState()
+        state.apply(.sessionStarted(SessionStarted(
+            sessionID: "s-1",
+            title: "First boot",
+            tool: .claudeCode,
+            summary: "Starting",
+            timestamp: t0
+        )))
+
+        #expect(state.session(id: "s-1")?.firstSeenAt == t0)
+
+        // A repeated sessionStarted (e.g. hook reconnect) must preserve the
+        // original firstSeenAt even though the payload timestamp is later.
+        state.apply(.sessionStarted(SessionStarted(
+            sessionID: "s-1",
+            title: "Re-attached",
+            tool: .claudeCode,
+            summary: "Reattached",
+            timestamp: t0.addingTimeInterval(120)
+        )))
+        #expect(state.session(id: "s-1")?.firstSeenAt == t0)
+        #expect(state.session(id: "s-1")?.updatedAt == t0.addingTimeInterval(120))
+
+        // Activity updates leave firstSeenAt untouched.
+        state.apply(.activityUpdated(SessionActivityUpdated(
+            sessionID: "s-1",
+            summary: "Working",
+            phase: .running,
+            timestamp: t0.addingTimeInterval(240)
+        )))
+        #expect(state.session(id: "s-1")?.firstSeenAt == t0)
+    }
+
+    @Test
+    func firstSeenAtPersistsThroughRegistryRoundTrip() throws {
+        let t0 = Date(timeIntervalSince1970: 20_000)
+        let session = AgentSession(
+            id: "claude-1",
+            title: "Repo",
+            tool: .claudeCode,
+            phase: .running,
+            summary: "Working",
+            updatedAt: t0.addingTimeInterval(60),
+            firstSeenAt: t0
+        )
+        let record = ClaudeTrackedSessionRecord(session: session)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(record)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ClaudeTrackedSessionRecord.self, from: data)
+
+        #expect(decoded.firstSeenAt == t0)
+        #expect(decoded.session.firstSeenAt == t0)
+
+        // Legacy records without firstSeenAt decode cleanly and fall back to
+        // updatedAt on the restored AgentSession.
+        let legacyJSON = """
+        {
+          "attachmentState": "stale",
+          "phase": "running",
+          "sessionID": "claude-legacy",
+          "summary": "Legacy",
+          "title": "Legacy",
+          "updatedAt": "2026-01-01T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+        let legacy = try decoder.decode(ClaudeTrackedSessionRecord.self, from: legacyJSON)
+        #expect(legacy.firstSeenAt == nil)
+        let legacyUpdated = ISO8601DateFormatter().date(from: "2026-01-01T00:00:00Z")
+        #expect(legacy.session.firstSeenAt == legacyUpdated)
     }
 }
 

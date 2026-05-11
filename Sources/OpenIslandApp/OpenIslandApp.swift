@@ -37,16 +37,8 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
 
-            // Hide all windows on launch — settings and debug open on demand only.
+            // Hide all windows on launch — settings opens on demand only.
             OpenIslandAppDelegate.hideAllAppWindows()
-
-            if harnessLaunchConfiguration.shouldShowControlCenter,
-               harnessLaunchConfiguration.scenario != nil {
-                model.showControlCenter()
-                harnessRuntimeMonitor.recordMilestone("controlCenterConfigured", message: "shown")
-            } else {
-                harnessRuntimeMonitor.recordMilestone("controlCenterConfigured", message: "hidden")
-            }
 
             harnessRuntimeMonitor.recordMilestone("bootstrapCompleted")
 
@@ -84,7 +76,7 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func hideAllAppWindows() {
-        for window in NSApp.windows where !window.className.contains("MenuBarExtra") {
+        for window in NSApp.windows {
             window.orderOut(nil)
         }
     }
@@ -116,26 +108,6 @@ struct OpenIslandApp: App {
                 .keyboardShortcut(",", modifiers: .command)
             }
         }
-
-        #if DEBUG
-        WindowGroup("Open Island Debug") {
-            ControlCenterView(model: appDelegate.model)
-        }
-        #endif
-
-        MenuBarExtra {
-            MenuBarContentView(model: appDelegate.model)
-                .onAppear {
-                    registerSettingsWindowOpener()
-                }
-        } label: {
-            OpenIslandBrandMark(size: 18, style: .template)
-                .accessibilityLabel("Open Island")
-                .onAppear {
-                    registerSettingsWindowOpener()
-                }
-        }
-        .menuBarExtraStyle(.window)
     }
 
     /// Registers the SwiftUI `openWindow` action before non-SwiftUI controls ask the model to show settings.
@@ -146,9 +118,8 @@ struct OpenIslandApp: App {
     }
 }
 
-/// Injects the SwiftUI `openWindow` action into `AppModel` so that
-/// `model.showSettings()` can materialize the window even if it has
-/// never been shown before (SwiftUI `Window` scenes are lazy).
+/// Refreshes the `openWindow` registration each time the settings
+/// window opens, keeping the closure current after window recreation.
 private struct SettingsWindowContent: View {
     var model: AppModel
     @Environment(\.openWindow) private var openWindow

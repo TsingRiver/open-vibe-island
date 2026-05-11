@@ -3,7 +3,6 @@ import Foundation
 struct HarnessLaunchConfiguration {
     let scenario: IslandDebugScenario?
     let presentOverlay: Bool
-    let shouldShowControlCenter: Bool
     let shouldStartBridge: Bool
     let shouldPerformBootAnimation: Bool
     let captureDelay: TimeInterval?
@@ -15,10 +14,6 @@ struct HarnessLaunchConfiguration {
         presentOverlay = Self.boolValue(
             environment["OPEN_ISLAND_HARNESS_PRESENT_OVERLAY"],
             default: false
-        )
-        shouldShowControlCenter = Self.boolValue(
-            environment["OPEN_ISLAND_HARNESS_SHOW_CONTROL_CENTER"],
-            default: true
         )
         shouldStartBridge = Self.boolValue(
             environment["OPEN_ISLAND_HARNESS_START_BRIDGE"],

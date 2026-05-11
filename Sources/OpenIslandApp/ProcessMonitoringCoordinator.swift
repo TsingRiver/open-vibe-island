@@ -39,6 +39,11 @@ final class ProcessMonitoringCoordinator {
     @ObservationIgnored
     var onCodexAppRunningChanged: ((_ isRunning: Bool) -> Void)?
 
+    /// Fires when at least one interactive Codex CLI process is visible.
+    /// The app uses this to re-scan rollout files created after startup.
+    @ObservationIgnored
+    var onCodexCLIProcessesObserved: ((_ activeSessionIDs: Set<String>) -> Void)?
+
     @ObservationIgnored
     let activeAgentProcessDiscovery = ActiveAgentProcessDiscovery()
 
@@ -135,6 +140,14 @@ final class ProcessMonitoringCoordinator {
         if isCodexAppRunning != wasCodexAppRunning {
             wasCodexAppRunning = isCodexAppRunning
             onCodexAppRunningChanged?(isCodexAppRunning)
+        }
+        let activeCodexCLISessionIDs = Set(
+            activeProcesses
+                .filter { $0.tool == .codex }
+                .compactMap(\.sessionID)
+        )
+        if !activeCodexCLISessionIDs.isEmpty {
+            onCodexCLIProcessesObserved?(activeCodexCLISessionIDs)
         }
 
         let sessions = local.sessions.filter(\.isTrackedLiveSession)

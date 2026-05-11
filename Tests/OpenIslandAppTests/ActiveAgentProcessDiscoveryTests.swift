@@ -130,4 +130,90 @@ struct ActiveAgentProcessDiscoveryTests {
             ),
         ])
     }
+
+    @Test
+    func codexDiscoveryUsesNewestOpenRolloutWhenProcessKeepsOldDescriptors() {
+        let discovery = ActiveAgentProcessDiscovery { executablePath, arguments in
+            if executablePath == "/bin/ps" {
+                return """
+                  202 401 ttys001 /opt/homebrew/bin/codex
+                  401 900 ttys001 -/opt/homebrew/bin/fish
+                  900 1 ?? /Applications/Ghostty.app/Contents/MacOS/ghostty
+                """
+            }
+
+            guard executablePath == "/usr/sbin/lsof",
+                  let pid = arguments.dropFirst(2).first else {
+                return nil
+            }
+
+            guard pid == "202" else {
+                Issue.record("unexpected lsof lookup for pid \(pid)")
+                return nil
+            }
+
+            return """
+            fcwd
+            n/tmp/open-island
+            n/Users/test/.codex/sessions/2026/05/10/rollout-2026-05-10T01-04-52-019e0db2-f3a5-7fe0-bea8-e63bd356c226.jsonl
+            n/Users/test/.codex/sessions/2026/05/10/rollout-2026-05-10T01-20-29-019e0dc1-3f8b-7eb0-ae8d-04a5911e95b9.jsonl
+            """
+        }
+
+        let snapshots = discovery.discover()
+
+        #expect(snapshots == [
+            .init(
+                tool: .codex,
+                sessionID: "019e0dc1-3f8b-7eb0-ae8d-04a5911e95b9",
+                workingDirectory: "/tmp/open-island",
+                terminalTTY: "/dev/ttys001",
+                terminalApp: "Ghostty",
+                transcriptPath: "/Users/test/.codex/sessions/2026/05/10/rollout-2026-05-10T01-20-29-019e0dc1-3f8b-7eb0-ae8d-04a5911e95b9.jsonl"
+            ),
+        ])
+    }
+
+    /// VS Code forks (Cursor, Windsurf, Trae, Qoder) bundle Electron's "Code
+    /// Helper" inside their .app bundles. Their helper paths therefore contain
+    /// both "/<fork>.app/" and "/code helper", and Open Island used to match
+    /// the broad "/code helper" check first → mis-attributed every fork to
+    /// stock VS Code (#415). Verify each fork is recognized correctly.
+    @Test(arguments: [
+        ("/Applications/Cursor.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper", "Cursor"),
+        ("/Applications/Windsurf.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper", "Windsurf"),
+        ("/Applications/Trae.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper", "Trae"),
+        ("/Applications/Qoder.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper", "Qoder"),
+        ("/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper", "VS Code"),
+    ])
+    func recognizesVSCodeForkBeforeFallingBackToVSCode(parentCommand: String, expectedTerminal: String) {
+        let discovery = ActiveAgentProcessDiscovery { executablePath, arguments in
+            if executablePath == "/bin/ps" {
+                return """
+                  102 301 ttys002 /Users/test/.local/bin/claude
+                  301 900 ttys002 -/opt/homebrew/bin/fish
+                  900 1 ?? \(parentCommand)
+                """
+            }
+            guard executablePath == "/usr/sbin/lsof" else {
+                return nil
+            }
+            return """
+            fcwd
+            n/tmp/open-island
+            """
+        }
+
+        let snapshots = discovery.discover()
+
+        #expect(snapshots == [
+            .init(
+                tool: .claudeCode,
+                sessionID: nil,
+                workingDirectory: "/tmp/open-island",
+                terminalTTY: "/dev/ttys002",
+                terminalApp: expectedTerminal
+            ),
+        ])
+    }
 }

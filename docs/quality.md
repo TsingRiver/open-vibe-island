@@ -29,7 +29,6 @@ The smoke path is intentionally aimed at the repository executable, not `~/Appli
 
 - `OPEN_ISLAND_HARNESS_SCENARIO` selects a case from `IslandDebugScenario`
 - `OPEN_ISLAND_HARNESS_PRESENT_OVERLAY` mirrors the scenario onto the real island overlay
-- `OPEN_ISLAND_HARNESS_SHOW_CONTROL_CENTER` controls whether the debug window is frontmost
 - `OPEN_ISLAND_HARNESS_START_BRIDGE` skips live socket setup when disabled
 - `OPEN_ISLAND_HARNESS_BOOT_ANIMATION` disables the normal boot animation for deterministic runs
 - `OPEN_ISLAND_HARNESS_CAPTURE_DELAY_SECONDS` controls when artifact capture runs after launch

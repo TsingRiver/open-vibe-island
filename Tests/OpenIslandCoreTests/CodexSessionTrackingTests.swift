@@ -222,6 +222,309 @@ struct CodexSessionTrackingTests {
     }
 
     @Test
+    func codexRolloutReducerAlignsCodexResponseItemStatuses() {
+        var snapshot = CodexRolloutSnapshot()
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:44.500Z",
+                type: "event_msg",
+                payload: [
+                    "type": "user_message",
+                    "message": "Check the Codex statuses.",
+                ]
+            ),
+            to: &snapshot
+        )
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:45.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "reasoning",
+                    "summary": [],
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == nil)
+        #expect(snapshot.currentCommandPreview == nil)
+        #expect(snapshot.summary == "Thinking.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:46.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "web_search_call",
+                    "status": "completed",
+                    "action": [
+                        "type": "search",
+                        "query": "Codex rollout ResponseItem",
+                    ],
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "web_search")
+        #expect(snapshot.currentCommandPreview == "Codex rollout ResponseItem")
+        #expect(snapshot.summary == "Running web search.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:47.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "done",
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == nil)
+        #expect(snapshot.currentCommandPreview == nil)
+        #expect(snapshot.summary == "Thinking.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:48.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "image_generation_call",
+                    "id": "ig-1",
+                    "status": "completed",
+                    "revised_prompt": "A status diagram",
+                    "result": "base64",
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "image_generation")
+        #expect(snapshot.currentCommandPreview == "A status diagram")
+        #expect(snapshot.summary == "Running image generation.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:49.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "local_shell_call",
+                    "status": "in_progress",
+                    "action": [
+                        "type": "exec",
+                        "command": ["zsh", "-lc", "swift test --filter CodexSessionTrackingTests"],
+                    ],
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "exec_command")
+        #expect(snapshot.currentCommandPreview == "swift test --filter CodexSessionTrackingTests")
+        #expect(snapshot.summary == "Running command.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:50.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "tool_search_call",
+                    "execution": "search docs",
+                    "arguments": [
+                        "query": "Codex EventMsg",
+                    ],
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "tool_search")
+        #expect(snapshot.currentCommandPreview == "search docs")
+        #expect(snapshot.summary == "Running tool search.")
+    }
+
+    @Test
+    func codexRolloutReducerAlignsCodexEventMessageStatuses() {
+        var snapshot = CodexRolloutSnapshot()
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:44.500Z",
+                type: "event_msg",
+                payload: [
+                    "type": "exec_command_begin",
+                    "command": ["zsh", "-lc", "git status -sb"],
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "exec_command")
+        #expect(snapshot.currentCommandPreview == "git status -sb")
+        #expect(snapshot.summary == "Running command.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:45.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "exec_command_end",
+                    "command": ["zsh", "-lc", "git status -sb"],
+                    "stdout": "",
+                    "stderr": "",
+                    "exit_code": 0,
+                    "status": "completed",
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == nil)
+        #expect(snapshot.currentCommandPreview == nil)
+        #expect(snapshot.summary == "Thinking.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:46.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "terminal_interaction",
+                    "stdin": "y\n",
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "write_stdin")
+        #expect(snapshot.currentCommandPreview == "y")
+        #expect(snapshot.summary == "Running input.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:47.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "patch_apply_begin",
+                    "changes": [
+                        "Sources/OpenIslandCore/CodexSessionTracking.swift": [:],
+                    ],
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "apply_patch")
+        #expect(snapshot.currentCommandPreview == "CodexSessionTracking.swift")
+        #expect(snapshot.summary == "Running patch.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:48.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "patch_apply_end",
+                    "success": true,
+                    "changes": [
+                        "Sources/OpenIslandCore/CodexSessionTracking.swift": [:],
+                    ],
+                    "status": "completed",
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == nil)
+        #expect(snapshot.summary == "Thinking.")
+
+        CodexRolloutReducer.apply(
+            line: rolloutLine(
+                timestamp: "2026-04-02T04:03:49.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "web_search_end",
+                    "query": "Codex statuses",
+                    "action": [
+                        "type": "find_in_page",
+                        "pattern": "ResponseItem",
+                        "url": "https://github.com/openai/codex",
+                    ],
+                ]
+            ),
+            to: &snapshot
+        )
+
+        #expect(snapshot.currentTool == "web_search")
+        #expect(snapshot.currentCommandPreview == "'ResponseItem' in https://github.com/openai/codex")
+        #expect(snapshot.summary == "Running web search.")
+    }
+
+    @Test
+    func codexRolloutReducerKeepsCompletionAfterTrailingToolEvents() {
+        let snapshot = CodexRolloutReducer.snapshot(for: [
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:44.500Z",
+                type: "event_msg",
+                payload: [
+                    "type": "user_message",
+                    "message": "Finish this turn.",
+                ]
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:45.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "task_complete",
+                    "last_agent_message": "Final answer stays visible.",
+                ]
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:46.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "exec_command_end",
+                    "command": ["zsh", "-lc", "git status -sb"],
+                    "stdout": "",
+                    "stderr": "",
+                    "exit_code": 0,
+                    "status": "completed",
+                ]
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:47.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "done",
+                ]
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:48.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "patch_apply_end",
+                    "success": true,
+                    "changes": [:],
+                    "status": "completed",
+                ]
+            ),
+        ])
+
+        #expect(snapshot.phase == .completed)
+        #expect(snapshot.isCompleted)
+        #expect(!snapshot.isInterrupted)
+        #expect(snapshot.currentTool == nil)
+        #expect(snapshot.currentCommandPreview == nil)
+        #expect(snapshot.summary == "Final answer stays visible.")
+        #expect(snapshot.updatedAt == Date(timeIntervalSince1970: 1_775_102_628))
+    }
+
+    @Test
     func codexRolloutReducerMarksTurnAbortedAsInterruptedCompletion() {
         let initialSnapshot = CodexRolloutReducer.snapshot(for: [
             rolloutLine(

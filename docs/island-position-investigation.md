@@ -51,7 +51,7 @@ So this machine clearly has both:
 - an external display with no notch
 - a built-in display with notch-specific safe-area geometry
 
-If the control-center window is key on the external display, the current overlay logic will happily anchor the island there.
+If the settings window is key on the external display, the current overlay logic will happily anchor the island there.
 
 ### 2. The code positions relative to `visibleFrame`, not the notch
 

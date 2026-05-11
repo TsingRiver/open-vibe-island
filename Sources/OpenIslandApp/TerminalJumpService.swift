@@ -169,15 +169,9 @@ struct TerminalJumpService {
             .map(\.bundleIdentifier)
     )
 
-    /// Bundle identifiers of VS Code family editors (VS Code, Insiders, Cursor, Windsurf, Trae).
-    private static let vscodeFamilyBundleIDs: Set<String> = [
-        "com.microsoft.VSCode",
-        "com.microsoft.VSCodeInsiders",
-        "com.todesktop.230313mzl4w4u92",
-        "com.exafunction.windsurf",
-        "com.trae.app",
-        "cn.trae.app",
-    ]
+    /// Bundle identifiers of VS Code family editors. Derived from
+    /// `vscodeFamilyCLI` so the two maps cannot drift.
+    private static let vscodeFamilyBundleIDs: Set<String> = Set(vscodeFamilyCLI.keys)
 
     /// Bundle identifiers of terminal emulators that commonly host Zellij,
     /// derived from `knownApps` so it stays in sync automatically.
@@ -448,9 +442,11 @@ struct TerminalJumpService {
         return try runAppleScript(script) == "matched"
     }
 
-    // MARK: - VS Code family (VS Code, Insiders, Cursor, Windsurf, Trae)
+    // MARK: - VS Code family (VS Code, Insiders, Cursor, Windsurf, Trae, Qoder)
 
     /// Maps bundle identifiers to the CLI command used to open a workspace.
+    /// Single source of truth — `vscodeFamilyBundleIDs` is derived from these
+    /// keys, so adding a fork here automatically routes its activation case.
     private static let vscodeFamilyCLI: [String: String] = [
         "com.microsoft.VSCode": "code",
         "com.microsoft.VSCodeInsiders": "code-insiders",
@@ -458,6 +454,7 @@ struct TerminalJumpService {
         "com.exafunction.windsurf": "windsurf",
         "com.trae.app": "trae",
         "cn.trae.app": "trae",
+        "com.qoder.qoder": "qoder",
     ]
 
     private func jumpToVSCodeFamilyWorkspace(_ workspacePath: String, bundleIdentifier: String) -> Bool {

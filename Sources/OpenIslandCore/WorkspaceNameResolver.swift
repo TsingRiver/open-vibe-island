@@ -39,4 +39,74 @@ public enum WorkspaceNameResolver {
 
         return nil
     }
+
+    public static func gitBranch(for cwd: String) -> String? {
+        if let worktreeBranch = worktreeBranch(for: cwd) {
+            return worktreeBranch
+        }
+
+        let fileManager = FileManager.default
+        var directory = URL(fileURLWithPath: cwd).standardizedFileURL
+
+        while true {
+            let gitURL = directory.appendingPathComponent(".git")
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: gitURL.path, isDirectory: &isDirectory) {
+                let gitDirectory: URL?
+                if isDirectory.boolValue {
+                    gitDirectory = gitURL
+                } else {
+                    gitDirectory = resolvedGitDirectory(fromGitFile: gitURL, relativeTo: directory)
+                }
+
+                if let gitDirectory {
+                    return branchName(fromHeadFile: gitDirectory.appendingPathComponent("HEAD"))
+                }
+            }
+
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path {
+                return nil
+            }
+            directory = parent
+        }
+    }
+
+    private static func resolvedGitDirectory(fromGitFile gitFile: URL, relativeTo directory: URL) -> URL? {
+        guard let content = try? String(contentsOf: gitFile, encoding: .utf8) else {
+            return nil
+        }
+
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "gitdir:"
+        guard trimmed.lowercased().hasPrefix(prefix) else {
+            return nil
+        }
+
+        let rawPath = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+        guard !rawPath.isEmpty else {
+            return nil
+        }
+
+        if rawPath.hasPrefix("/") {
+            return URL(fileURLWithPath: rawPath).standardizedFileURL
+        }
+
+        return directory.appendingPathComponent(rawPath).standardizedFileURL
+    }
+
+    private static func branchName(fromHeadFile headURL: URL) -> String? {
+        guard let content = try? String(contentsOf: headURL, encoding: .utf8) else {
+            return nil
+        }
+
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let refPrefix = "ref: refs/heads/"
+        guard trimmed.hasPrefix(refPrefix) else {
+            return nil
+        }
+
+        let branch = trimmed.dropFirst(refPrefix.count)
+        return branch.isEmpty ? nil : String(branch)
+    }
 }

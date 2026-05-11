@@ -9,7 +9,6 @@ struct HarnessLaunchConfigurationTests {
 
         #expect(configuration.scenario == nil)
         #expect(!configuration.presentOverlay)
-        #expect(configuration.shouldShowControlCenter)
         #expect(configuration.shouldStartBridge)
         #expect(configuration.shouldPerformBootAnimation)
         #expect(configuration.captureDelay == nil)
@@ -23,7 +22,6 @@ struct HarnessLaunchConfigurationTests {
             environment: [
                 "OPEN_ISLAND_HARNESS_SCENARIO": "approvalcard",
                 "OPEN_ISLAND_HARNESS_PRESENT_OVERLAY": "true",
-                "OPEN_ISLAND_HARNESS_SHOW_CONTROL_CENTER": "0",
                 "OPEN_ISLAND_HARNESS_START_BRIDGE": "no",
                 "OPEN_ISLAND_HARNESS_BOOT_ANIMATION": "off",
                 "OPEN_ISLAND_HARNESS_CAPTURE_DELAY_SECONDS": "1.5",
@@ -34,7 +32,6 @@ struct HarnessLaunchConfigurationTests {
 
         #expect(configuration.scenario == .approvalCard)
         #expect(configuration.presentOverlay)
-        #expect(!configuration.shouldShowControlCenter)
         #expect(!configuration.shouldStartBridge)
         #expect(!configuration.shouldPerformBootAnimation)
         #expect(configuration.captureDelay == 1.5)

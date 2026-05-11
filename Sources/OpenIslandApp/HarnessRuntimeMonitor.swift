@@ -16,7 +16,6 @@ struct HarnessRuntimeArtifacts: Codable, Equatable {
     struct TimingSummary: Codable, Equatable {
         let bootstrapSeconds: Double?
         let scenarioLoadSeconds: Double?
-        let controlCenterConfiguredSeconds: Double?
         let overlayPresentedSeconds: Double?
         let bridgeReadySeconds: Double?
         let captureScheduledSeconds: Double?
@@ -58,7 +57,6 @@ struct HarnessRuntimeArtifacts: Codable, Equatable {
             timings: TimingSummary(
                 bootstrapSeconds: offset(for: "bootstrapCompleted"),
                 scenarioLoadSeconds: offset(for: "scenarioLoaded"),
-                controlCenterConfiguredSeconds: offset(for: "controlCenterConfigured"),
                 overlayPresentedSeconds: offset(for: "overlayPresented"),
                 bridgeReadySeconds: offset(for: "bridgeReady"),
                 captureScheduledSeconds: offset(for: "captureScheduled"),

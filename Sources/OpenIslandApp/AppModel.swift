@@ -21,21 +21,17 @@ final class AppModel {
     private static let soundMutedDefaultsKey = "overlay.sound.muted"
     private static let showDockIconDefaultsKey = "app.showDockIcon"
     private static let hapticFeedbackEnabledDefaultsKey = "app.hapticFeedbackEnabled"
-    private static let islandAppearanceModeDefaultsKey = "appearance.island.mode"
-    private static let islandClosedDisplayStyleDefaultsKey = "appearance.island.closedDisplayStyle"
-    private static let islandHideIdleToEdgeDefaultsKey = "appearance.island.hideIdleToEdge"
-    private static let islandPixelShapeStyleDefaultsKey = "appearance.island.pixelShapeStyle"
-    private static let islandStatusColorsDefaultsKey = "appearance.island.statusColors"
+    private static let islandRightSlotDefaultsKey = "appearance.island.v6.rightSlot"
+    private static let islandCenterLabelDefaultsKey = "appearance.island.v6.centerLabel"
     private static let showCodexUsageDefaultsKey = "app.showCodexUsage"
     private static let completionReplyEnabledDefaultsKey = "feature.completionReply.enabled"
     private static let suppressFrontmostNotificationsDefaultsKey = "app.suppressFrontmostNotifications"
+    private static let legacyIslandSessionStateIndicatorDefaultsKey = "appearance.island.v8.stateIndicator"
+    private static let legacyIslandSessionGroupDefaultsKey = "appearance.island.v8.sessionGroup"
+    private static let legacyIslandSessionSortDefaultsKey = "appearance.island.v8.sessionSort"
+    private static let legacyCompletedStaleThresholdDefaultsKey = "appearance.island.v8.completedStaleThreshold"
+    private static let appearanceProfileSettingsDefaultsKey = "appearance.island.v8.settingsProfile"
 
-    static let defaultStatusColors: [SessionPhase: String] = [
-        .running: "#6E9FFF",
-        .waitingForApproval: "#FFB547",
-        .waitingForAnswer: "#FFD95A",
-        .completed: "#42E86B",
-    ]
     private static let syntheticClaudeSessionPrefix = "claude-process:"
     private static let liveSessionStalenessWindow: TimeInterval = 15 * 60
     private static let jumpOverlayDismissLeadTime: Duration = .milliseconds(20)
@@ -57,6 +53,15 @@ final class AppModel {
         }
     }
     @ObservationIgnored private var _cachedSessionBuckets: (primary: [AgentSession], overflow: [AgentSession])?
+
+    /// Monotonic ticket assigned the first time a session ID shows up in the
+    /// closed-island's right-slot surfaced set. Drives the grid's display
+    /// order: newly-surfaced sessions always land at the end, and a session
+    /// that briefly leaves (e.g. attachment flip) keeps its old slot when it
+    /// returns. Persists for the process lifetime; session IDs are UUIDs so
+    /// accumulation over time is bounded in practice.
+    @ObservationIgnored private var _agentsGridObservedSequence: [String: Int] = [:]
+    @ObservationIgnored private var _agentsGridNextTicket: Int = 0
     var selectedSessionID: String?
     let hooks = HookInstallationCoordinator()
     let overlay = OverlayUICoordinator()
@@ -262,6 +267,28 @@ final class AppModel {
             UserDefaults.standard.set(suppressFrontmostNotifications, forKey: Self.suppressFrontmostNotificationsDefaultsKey)
         }
     }
+    var launchAtLoginEnabled: Bool = false {
+        didSet {
+            guard !isApplyingLaunchAtLogin, hasFinishedInit, launchAtLoginEnabled != oldValue else { return }
+            do {
+                try LaunchAtLoginService.shared.setEnabled(launchAtLoginEnabled)
+            } catch {
+                isApplyingLaunchAtLogin = true
+                launchAtLoginEnabled = oldValue
+                isApplyingLaunchAtLogin = false
+                presentLaunchAtLoginError(error)
+            }
+        }
+    }
+    private func presentLaunchAtLoginError(_ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = lang.t("settings.general.launchAtLogin")
+        alert.informativeText = error.localizedDescription
+        alert.runModal()
+    }
+    @ObservationIgnored
+    private var isApplyingLaunchAtLogin = false
     var isSoundMuted = false {
         didSet {
             guard isSoundMuted != oldValue else {
@@ -287,97 +314,76 @@ final class AppModel {
 
     // MARK: - Appearance
 
-    var islandAppearanceMode: IslandAppearanceMode = .default {
+    var appearanceSettingsProfile: IslandAppearanceDisplayProfile = .topBar {
         didSet {
-            guard islandAppearanceMode != oldValue else { return }
-            UserDefaults.standard.set(islandAppearanceMode.rawValue, forKey: Self.islandAppearanceModeDefaultsKey)
-            refreshOverlayPlacementIfVisible()
+            guard appearanceSettingsProfile != oldValue else { return }
+            UserDefaults.standard.set(appearanceSettingsProfile.rawValue, forKey: Self.appearanceProfileSettingsDefaultsKey)
         }
     }
 
-    var isCustomAppearance: Bool { islandAppearanceMode == .custom }
-
-    /// Whether the collapsed island should include text labels instead of only
-    /// icon/count indicators. The style picker is only exposed in Custom mode,
-    /// so Default appearance keeps the built-in compact visual.
-    var usesDetailedClosedDisplay: Bool {
-        isCustomAppearance && islandClosedDisplayStyle == .detailed
-    }
-
-    var islandClosedDisplayStyle: IslandClosedDisplayStyle = .detailed {
+    private var notchAppearancePreferences = IslandAppearancePreferences() {
         didSet {
-            guard islandClosedDisplayStyle != oldValue else { return }
-            UserDefaults.standard.set(islandClosedDisplayStyle.rawValue, forKey: Self.islandClosedDisplayStyleDefaultsKey)
-            refreshOverlayPlacementIfVisible()
+            guard notchAppearancePreferences != oldValue else { return }
+            persistAppearancePreferences(notchAppearancePreferences, for: .notch)
+            if activeAppearanceProfile == .notch { appearancePreferencesDidChange(oldValue: oldValue, newValue: notchAppearancePreferences) }
         }
     }
-    var hideIdleIslandToEdge: Bool = false {
+
+    private var topBarAppearancePreferences = IslandAppearancePreferences() {
         didSet {
-            guard hideIdleIslandToEdge != oldValue else { return }
-            UserDefaults.standard.set(hideIdleIslandToEdge, forKey: Self.islandHideIdleToEdgeDefaultsKey)
-            refreshOverlayPlacementIfVisible()
-        }
-    }
-    var islandPixelShapeStyle: IslandPixelShapeStyle = .bars {
-        didSet {
-            guard islandPixelShapeStyle != oldValue else { return }
-            UserDefaults.standard.set(islandPixelShapeStyle.rawValue, forKey: Self.islandPixelShapeStyleDefaultsKey)
-        }
-    }
-    var statusColorHexes: [SessionPhase: String] = AppModel.defaultStatusColors {
-        didSet {
-            guard statusColorHexes != oldValue else { return }
-            let encoded = statusColorHexes.reduce(into: [String: String]()) { $0[$1.key.rawValue] = $1.value }
-            UserDefaults.standard.set(encoded, forKey: Self.islandStatusColorsDefaultsKey)
-            _cachedStatusColors = [:]
-        }
-    }
-    var customAvatarImage: NSImage? = nil
-    private var _cachedStatusColors: [SessionPhase: Color] = [:]
-
-    func statusColor(for phase: SessionPhase) -> Color {
-        if let cached = _cachedStatusColors[phase] { return cached }
-        let hex = statusColorHexes[phase] ?? Self.defaultStatusColors[phase] ?? "#6E9FFF"
-        let color = Color(hex: hex) ?? .white
-        _cachedStatusColors[phase] = color
-        return color
-    }
-
-    func setStatusColor(_ color: Color, for phase: SessionPhase) {
-        guard let hex = color.opaqueHexString else { return }
-        statusColorHexes[phase] = hex
-    }
-
-    var showsIdleEdgeWhenCollapsed: Bool {
-        hideIdleIslandToEdge && notchStatus == .closed
-    }
-
-    func importCustomAvatar() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            customAvatarImage = try AvatarImageStore.importImage(from: url)
-            islandPixelShapeStyle = .custom
-        } catch {
-            lastActionMessage = error.localizedDescription
+            guard topBarAppearancePreferences != oldValue else { return }
+            persistAppearancePreferences(topBarAppearancePreferences, for: .topBar)
+            if activeAppearanceProfile == .topBar { appearancePreferencesDidChange(oldValue: oldValue, newValue: topBarAppearancePreferences) }
         }
     }
 
-    func removeCustomAvatar() {
-        do {
-            try AvatarImageStore.removeCurrentImage()
-            customAvatarImage = nil
-            if islandPixelShapeStyle == .custom {
-                islandPixelShapeStyle = .bars
-            }
-        } catch {
-            lastActionMessage = error.localizedDescription
+    /// Runtime profile selected from current overlay placement. External
+    /// displays use the top-bar presentation; built-in notch displays keep
+    /// notch-aware geometry and their own persisted appearance choices.
+    var activeAppearanceProfile: IslandAppearanceDisplayProfile {
+        if let mode = overlayPlacementDiagnostics?.mode {
+            return mode == .notch ? .notch : .topBar
         }
+
+        // Before the overlay has been positioned, infer the runtime profile
+        // from available screens so preference writes do not jump profiles on
+        // the first placement refresh.
+        return NSScreen.screens.contains(where: { $0.safeAreaInsets.top > 0 }) ? .notch : .topBar
+    }
+
+    var islandRightSlot: IslandRightSlot {
+        get { appearancePreferences(for: activeAppearanceProfile).rightSlot }
+        set { updateAppearancePreferences(for: activeAppearanceProfile) { $0.rightSlot = newValue } }
+    }
+
+    var islandCenterLabel: IslandCenterLabel {
+        get { appearancePreferences(for: activeAppearanceProfile).centerLabel }
+        set { updateAppearancePreferences(for: activeAppearanceProfile) { $0.centerLabel = newValue } }
+    }
+
+    var islandUsageDisplay: IslandUsageDisplay {
+        get { appearancePreferences(for: activeAppearanceProfile).usageDisplay }
+        set { updateAppearancePreferences(for: activeAppearanceProfile) { $0.usageDisplay = newValue } }
+    }
+
+    var islandSessionStateIndicator: IslandSessionStateIndicator {
+        get { appearancePreferences(for: activeAppearanceProfile).sessionStateIndicator }
+        set { updateAppearancePreferences(for: activeAppearanceProfile) { $0.sessionStateIndicator = newValue } }
+    }
+
+    var islandSessionGroup: IslandSessionGroup {
+        get { appearancePreferences(for: activeAppearanceProfile).sessionGroup }
+        set { updateAppearancePreferences(for: activeAppearanceProfile) { $0.sessionGroup = newValue } }
+    }
+
+    var islandSessionSort: IslandSessionSort {
+        get { appearancePreferences(for: activeAppearanceProfile).sessionSort }
+        set { updateAppearancePreferences(for: activeAppearanceProfile) { $0.sessionSort = newValue } }
+    }
+
+    var completedStaleThreshold: IslandCompletedStaleThreshold {
+        get { appearancePreferences(for: activeAppearanceProfile).completedStaleThreshold }
+        set { updateAppearancePreferences(for: activeAppearanceProfile) { $0.completedStaleThreshold = newValue } }
     }
 
     @ObservationIgnored
@@ -385,6 +391,51 @@ final class AppModel {
 
     @ObservationIgnored
     private var hasFinishedInit = false
+
+    func appearancePreferences(for profile: IslandAppearanceDisplayProfile) -> IslandAppearancePreferences {
+        switch profile {
+        case .notch: notchAppearancePreferences
+        case .topBar: topBarAppearancePreferences
+        }
+    }
+
+    func updateAppearancePreferences(
+        for profile: IslandAppearanceDisplayProfile,
+        _ update: (inout IslandAppearancePreferences) -> Void
+    ) {
+        switch profile {
+        case .notch:
+            update(&notchAppearancePreferences)
+        case .topBar:
+            update(&topBarAppearancePreferences)
+        }
+    }
+
+    private func appearancePreferencesDidChange(
+        oldValue: IslandAppearancePreferences,
+        newValue: IslandAppearancePreferences
+    ) {
+        if oldValue.sessionGroup != newValue.sessionGroup ||
+            oldValue.sessionSort != newValue.sessionSort ||
+            oldValue.completedStaleThreshold != newValue.completedStaleThreshold {
+            _cachedSessionBuckets = nil
+        }
+        refreshOverlayPlacementIfVisible()
+    }
+
+    private func persistAppearancePreferences(
+        _ preferences: IslandAppearancePreferences,
+        for profile: IslandAppearanceDisplayProfile
+    ) {
+        let defaults = UserDefaults.standard
+        defaults.set(preferences.rightSlot.rawValue, forKey: Self.appearanceDefaultsKey(profile, "rightSlot"))
+        defaults.set(preferences.centerLabel.rawValue, forKey: Self.appearanceDefaultsKey(profile, "centerLabel"))
+        defaults.set(preferences.usageDisplay.rawValue, forKey: Self.appearanceDefaultsKey(profile, "usageDisplay"))
+        defaults.set(preferences.sessionStateIndicator.rawValue, forKey: Self.appearanceDefaultsKey(profile, "stateIndicator"))
+        defaults.set(preferences.sessionGroup.rawValue, forKey: Self.appearanceDefaultsKey(profile, "sessionGroup"))
+        defaults.set(preferences.sessionSort.rawValue, forKey: Self.appearanceDefaultsKey(profile, "sessionSort"))
+        defaults.set(preferences.completedStaleThreshold.rawValue, forKey: Self.appearanceDefaultsKey(profile, "completedStaleThreshold"))
+    }
 
     // MARK: - Watch Notification
 
@@ -490,6 +541,50 @@ final class AppModel {
     @ObservationIgnored
     private var notificationPresentationTask: Task<Void, Never>?
 
+    private static func appearanceDefaultsKey(_ profile: IslandAppearanceDisplayProfile, _ name: String) -> String {
+        "appearance.island.v8.\(profile.rawValue).\(name)"
+    }
+
+    private static func loadAppearancePreferences(for profile: IslandAppearanceDisplayProfile) -> IslandAppearancePreferences {
+        let defaults = UserDefaults.standard
+        return IslandAppearancePreferences(
+            rightSlot: IslandRightSlot(
+                rawValue: defaults.string(forKey: appearanceDefaultsKey(profile, "rightSlot"))
+                    ?? defaults.string(forKey: islandRightSlotDefaultsKey)
+                    ?? ""
+            ) ?? .count,
+            centerLabel: IslandCenterLabel(
+                rawValue: defaults.string(forKey: appearanceDefaultsKey(profile, "centerLabel"))
+                    ?? defaults.string(forKey: islandCenterLabelDefaultsKey)
+                    ?? ""
+            ) ?? .agentAction,
+            usageDisplay: IslandUsageDisplay(
+                rawValue: defaults.string(forKey: appearanceDefaultsKey(profile, "usageDisplay"))
+                    ?? ""
+            ) ?? .compact,
+            sessionStateIndicator: IslandSessionStateIndicator(
+                rawValue: defaults.string(forKey: appearanceDefaultsKey(profile, "stateIndicator"))
+                    ?? defaults.string(forKey: legacyIslandSessionStateIndicatorDefaultsKey)
+                    ?? ""
+            ) ?? .animatedDot,
+            sessionGroup: IslandSessionGroup(
+                rawValue: defaults.string(forKey: appearanceDefaultsKey(profile, "sessionGroup"))
+                    ?? defaults.string(forKey: legacyIslandSessionGroupDefaultsKey)
+                    ?? ""
+            ) ?? .none,
+            sessionSort: IslandSessionSort(
+                rawValue: defaults.string(forKey: appearanceDefaultsKey(profile, "sessionSort"))
+                    ?? defaults.string(forKey: legacyIslandSessionSortDefaultsKey)
+                    ?? ""
+            ) ?? .attention,
+            completedStaleThreshold: IslandCompletedStaleThreshold(
+                rawValue: defaults.string(forKey: appearanceDefaultsKey(profile, "completedStaleThreshold"))
+                    ?? defaults.string(forKey: legacyCompletedStaleThresholdDefaultsKey)
+                    ?? ""
+            ) ?? .fiveMinutes
+        )
+    }
+
     init(
         terminalJumpAction: @escaping @Sendable (JumpTarget) throws -> String = { target in
             try TerminalJumpService().jump(to: target)
@@ -519,26 +614,12 @@ final class AppModel {
             )
         }
         completionReplyEnabled = UserDefaults.standard.bool(forKey: Self.completionReplyEnabledDefaultsKey)
-        islandAppearanceMode = IslandAppearanceMode(
-            rawValue: UserDefaults.standard.string(forKey: Self.islandAppearanceModeDefaultsKey) ?? ""
-        ) ?? .default
-        islandClosedDisplayStyle = IslandClosedDisplayStyle(
-            rawValue: UserDefaults.standard.string(forKey: Self.islandClosedDisplayStyleDefaultsKey) ?? ""
-        ) ?? .detailed
-        hideIdleIslandToEdge = UserDefaults.standard.bool(forKey: Self.islandHideIdleToEdgeDefaultsKey)
-        islandPixelShapeStyle = IslandPixelShapeStyle(
-            rawValue: UserDefaults.standard.string(forKey: Self.islandPixelShapeStyleDefaultsKey) ?? ""
-        ) ?? .bars
-        customAvatarImage = AvatarImageStore.currentImage()
-        if let saved = UserDefaults.standard.dictionary(forKey: Self.islandStatusColorsDefaultsKey) as? [String: String] {
-            var colors = Self.defaultStatusColors
-            for (key, value) in saved {
-                if let phase = SessionPhase(rawValue: key) {
-                    colors[phase] = value.normalizedHexColorString
-                }
-            }
-            statusColorHexes = colors
-        }
+        launchAtLoginEnabled = LaunchAtLoginService.shared.isEnabled
+        appearanceSettingsProfile = IslandAppearanceDisplayProfile(
+            rawValue: UserDefaults.standard.string(forKey: Self.appearanceProfileSettingsDefaultsKey) ?? ""
+        ) ?? .topBar
+        notchAppearancePreferences = Self.loadAppearancePreferences(for: .notch)
+        topBarAppearancePreferences = Self.loadAppearancePreferences(for: .topBar)
         watchNotificationEnabled = UserDefaults.standard.bool(forKey: Self.watchNotificationEnabledKey)
         if watchNotificationEnabled {
             startWatchRelay()
@@ -623,6 +704,9 @@ final class AppModel {
                 self.codexAppServer.disconnect()
             }
         }
+        monitoring.onCodexCLIProcessesObserved = { [weak self] activeSessionIDs in
+            self?.discovery.rediscoverCodexCLISessionsIfNeeded(activeSessionIDs: activeSessionIDs)
+        }
 
         refreshOverlayDisplayConfiguration()
         hasFinishedInit = true
@@ -657,7 +741,38 @@ final class AppModel {
     }
 
     var islandListSessions: [AgentSession] {
-        surfacedSessions
+        islandSessionSections.flatMap(\.sessions)
+    }
+
+    var islandSessionSections: [IslandSessionSection] {
+        let sessions = sortIslandSessions(surfacedSessions)
+        switch islandSessionGroup {
+        case .none:
+            return [
+                IslandSessionSection(
+                    id: "all",
+                    title: "island.section.sessions",
+                    sessions: sessions
+                )
+            ]
+        case .state:
+            return stateGroupedSections(for: sessions)
+        case .agent:
+            return AgentTool.allCases.compactMap { tool in
+                let list = sessions.filter { $0.tool == tool }
+                guard !list.isEmpty else { return nil }
+                return IslandSessionSection(id: "agent-\(tool.rawValue)", title: tool.displayName, sessions: list)
+            }
+        case .project:
+            let names = Set(sessions.map(projectGroupName(for:))).sorted {
+                $0.localizedStandardCompare($1) == .orderedAscending
+            }
+            return names.compactMap { name in
+                let list = sessions.filter { projectGroupName(for: $0) == name }
+                guard !list.isEmpty else { return nil }
+                return IslandSessionSection(id: "project-\(name)", title: name, sessions: list)
+            }
+        }
     }
 
     var recentSessionCount: Int {
@@ -674,6 +789,164 @@ final class AppModel {
 
     var liveRunningCount: Int {
         surfacedSessions.filter { $0.phase == .running }.count
+    }
+
+    private func sortIslandSessions(_ sessions: [AgentSession]) -> [AgentSession] {
+        switch islandSessionSort {
+        case .attention:
+            return sessions
+        case .lastUpdate:
+            return sessions.sorted { lhs, rhs in
+                if lhs.islandActivityDate == rhs.islandActivityDate {
+                    return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+                }
+                return lhs.islandActivityDate > rhs.islandActivityDate
+            }
+        }
+    }
+
+    private func stateGroupedSections(for sessions: [AgentSession]) -> [IslandSessionSection] {
+        let definitions: [(id: String, title: String, include: (AgentSession) -> Bool)] = [
+            ("approval", "island.section.needsApproval", { $0.phase == .waitingForApproval }),
+            ("answer", "island.section.needsAnswer", { $0.phase == .waitingForAnswer }),
+            ("running", "island.section.inProgress", { $0.phase == .running }),
+            ("done", "island.section.justDone", { [completedStaleThreshold] session in
+                session.phase == .completed
+                    && !session.isStaleCompletedForIsland(at: .now, threshold: completedStaleThreshold.seconds)
+            }),
+            ("idle", "island.section.idle", { [completedStaleThreshold] session in
+                session.phase == .completed
+                    && session.isStaleCompletedForIsland(at: .now, threshold: completedStaleThreshold.seconds)
+            }),
+        ]
+
+        return definitions.compactMap { definition in
+            let list = sessions.filter(definition.include)
+            guard !list.isEmpty else { return nil }
+            return IslandSessionSection(id: "state-\(definition.id)", title: definition.title, sessions: list)
+        }
+    }
+
+    private func projectGroupName(for session: AgentSession) -> String {
+        if let workspace = session.jumpTarget?.workspaceName.trimmingCharacters(in: .whitespacesAndNewlines),
+           !workspace.isEmpty {
+            return workspace
+        }
+
+        let title = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return session.tool.displayName }
+
+        let pieces = title.split(separator: "·", maxSplits: 1).map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return pieces.last?.isEmpty == false ? pieces.last! : title
+    }
+
+    // MARK: - v6 closed-island derivation
+
+    /// The aggregate UnifiedBars state for the closed island. Waiting beats
+    /// running; everything else is idle. Completed sessions are absorbed
+    /// directly into idle so the pill never stops on a tick glyph.
+    var islandClosedMode: UnifiedBars.Mode {
+        let sessions = surfacedSessions
+        if sessions.contains(where: { $0.phase.requiresAttention }) { return .waiting }
+        if sessions.contains(where: { $0.phase == .running })       { return .running }
+        return .idle
+    }
+
+    /// The spotlight session powering the center label (if any). Attention
+    /// sessions first, then the most recent running one, then whatever's
+    /// first.
+    var islandClosedSpotlight: AgentSession? {
+        surfacedSessions.first(where: { $0.phase.requiresAttention })
+            ?? surfacedSessions.first(where: { $0.phase == .running })
+            ?? surfacedSessions.first
+    }
+
+    /// Text to show in the closed island's center label. Respects the
+    /// `islandCenterLabel` user preference.
+    func islandClosedLabel() -> String? {
+        guard islandCenterLabel != .off,
+              let session = islandClosedSpotlight else { return nil }
+
+        switch islandCenterLabel {
+        case .off:
+            return nil
+        case .sessionName:
+            let workspace = session.jumpTarget?.workspaceName ?? ""
+            if !workspace.isEmpty { return workspace }
+            return session.title.isEmpty ? session.tool.displayName : session.title
+        case .agentAction:
+            let action = session.displayCurrentToolName
+            if let action, !action.isEmpty {
+                return "\(session.tool.displayName) · \(action)"
+            }
+            return session.tool.displayName
+        }
+    }
+
+    /// Right-slot payload derived from the user's `islandRightSlot`
+    /// preference and current live state. Returns nil when the preference
+    /// is `.none` or there's nothing meaningful to show.
+    func islandClosedRightSlotContent() -> IslandRightSlotContent? {
+        let sessions = surfacedSessions
+        switch islandRightSlot {
+        case .none:
+            return nil
+        case .count:
+            let n = sessions.count
+            guard n > 0 else { return nil }
+            return .count(n)
+        case .agents:
+            // Display order = order-of-first-observation-in-the-island. A
+            // session that later flips visibility (e.g. attachment churn,
+            // completed↔running) keeps its existing slot instead of being
+            // reshuffled by session.firstSeenAt, which tracks the historical
+            // event time and can be older than visible peers. Bulk-observing
+            // N sessions at once (e.g. at app launch) breaks the tie by
+            // session.firstSeenAt so historical order is preserved.
+            stampAgentsGridObservationTickets(for: sessions)
+            let ordered = sessions.sorted { a, b in
+                let ta = _agentsGridObservedSequence[a.id] ?? .max
+                let tb = _agentsGridObservedSequence[b.id] ?? .max
+                if ta != tb { return ta < tb }
+                return a.id < b.id
+            }
+            var cells: [AgentGridCell] = []
+            if ordered.count <= 9 {
+                cells = ordered.map(Self.agentsGridCell(for:))
+            } else {
+                cells = ordered.prefix(7).map(Self.agentsGridCell(for:))
+                cells.append(.overflow(ordered.count - 7))
+            }
+            return cells.isEmpty ? nil : .agents(cells)
+        }
+    }
+
+    private func stampAgentsGridObservationTickets(for sessions: [AgentSession]) {
+        let newcomers = sessions.filter { _agentsGridObservedSequence[$0.id] == nil }
+        guard !newcomers.isEmpty else { return }
+        let orderedNewcomers = newcomers.sorted { a, b in
+            if a.firstSeenAt != b.firstSeenAt { return a.firstSeenAt < b.firstSeenAt }
+            return a.id < b.id
+        }
+        for session in orderedNewcomers {
+            _agentsGridObservedSequence[session.id] = _agentsGridNextTicket
+            _agentsGridNextTicket += 1
+        }
+    }
+
+    private static func agentsGridCell(for session: AgentSession) -> AgentGridCell {
+        let color = Color(hex: session.tool.brandColorHex) ?? .gray
+        let state: AgentGridCellState
+        if session.phase.requiresAttention {
+            state = .waiting
+        } else if session.phase == .running {
+            state = .running
+        } else {
+            state = .idle
+        }
+        return .session(color: color, state: state)
     }
 
     var shouldShowSessionBootstrapPlaceholder: Bool {
@@ -954,6 +1227,8 @@ final class AppModel {
     var shouldAutoCollapseOnMouseLeave: Bool { overlay.shouldAutoCollapseOnMouseLeave }
     var autoCollapseOnMouseLeaveRequiresPriorSurfaceEntry: Bool { overlay.autoCollapseOnMouseLeaveRequiresPriorSurfaceEntry }
     var showsNotificationCard: Bool { overlay.showsNotificationCard }
+    var shouldDeferTimedNotificationAutoCollapse: Bool { overlay.shouldDeferTimedNotificationAutoCollapse }
+    var hasPendingNotificationAutoCollapse: Bool { overlay.hasPendingNotificationAutoCollapse }
 
     func loadDebugSnapshot(
         _ snapshot: IslandDebugSnapshot,
@@ -978,7 +1253,15 @@ final class AppModel {
     ///
     /// Complexity: O(n) over current `NSApp.windows`; n is the number of app windows.
     func showSettings() {
-        openSettingsWindow?()
+        if let opener = openSettingsWindow {
+            opener()
+        } else {
+            // First-launch fallback: SwiftUI's `openWindow` closure is registered
+            // by `SettingsWindowContent.onAppear`, which may not fire until the
+            // settings window renders once. Send the standard responder action
+            // so the CommandGroup path can materialize the window.
+            NSApp.sendAction(NSSelectorFromString("showSettingsWindow:"), to: nil, from: nil)
+        }
         focusSettingsWindowIfPresent()
 
         // SwiftUI creates `Window` scenes asynchronously, so focus once more on
@@ -1004,25 +1287,6 @@ final class AppModel {
     func showOnboarding() {
         showSettings()
         NotificationCenter.default.post(name: .openIslandSelectSetupTab, object: nil)
-    }
-
-    func showControlCenter() {
-        guard let window = NSApp.windows.first(where: { $0.title == "Open Island Debug" }) else {
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
-        window.orderFrontRegardless()
-        window.makeKey()
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func hideControlCenter() {
-        guard let window = NSApp.windows.first(where: { $0.title == "Open Island Debug" }) else {
-            return
-        }
-
-        window.orderOut(nil)
     }
 
     func toggleSoundMuted() {
@@ -1353,6 +1617,7 @@ final class AppModel {
 
         return (ingress == .bridge || !isResolvingInitialLiveSessions)
             && (notchStatus == .closed || notchOpenReason == .notification)
+            && !overlay.shouldPreserveCurrentNotificationSurface(against: surface)
             && surface.matchesCurrentState(of: session)
     }
 
@@ -1505,6 +1770,10 @@ final class AppModel {
             score += 1_200
         case .completed:
             score += 600
+        }
+
+        if session.isStaleCompletedForIsland(at: now, threshold: completedStaleThreshold.seconds) {
+            score -= 900
         }
 
         let age = now.timeIntervalSince(session.islandActivityDate)

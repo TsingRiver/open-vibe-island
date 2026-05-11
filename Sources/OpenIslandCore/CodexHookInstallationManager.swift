@@ -35,15 +35,18 @@ public final class CodexHookInstallationManager: @unchecked Sendable {
     public let codexDirectory: URL
     public let managedHooksBinaryURL: URL
     private let fileManager: FileManager
+    private let featureKeyProvider: @Sendable () -> CodexHooksFeatureFlagKey
 
     public init(
         codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true),
         managedHooksBinaryURL: URL = ManagedHooksBinary.defaultURL(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        featureKeyProvider: @escaping @Sendable () -> CodexHooksFeatureFlagKey = CodexHookInstaller.preferredCodexHooksFeatureKey
     ) {
         self.codexDirectory = codexDirectory
         self.managedHooksBinaryURL = managedHooksBinaryURL.standardizedFileURL
         self.fileManager = fileManager
+        self.featureKeyProvider = featureKeyProvider
     }
 
     public func status(hooksBinaryURL: URL? = nil) throws -> CodexHookInstallationStatus {
@@ -67,7 +70,7 @@ public final class CodexHookInstallationManager: @unchecked Sendable {
             hooksURL: hooksURL,
             manifestURL: manifestURL,
             hooksBinaryURL: resolvedHooksBinaryURL,
-            featureFlagEnabled: configContents.contains("codex_hooks = true"),
+            featureFlagEnabled: CodexHookInstaller.isCodexHooksFeatureEnabled(in: configContents),
             managedHooksPresent: managedHooksPresent,
             manifest: manifest
         )
@@ -91,7 +94,10 @@ public final class CodexHookInstallationManager: @unchecked Sendable {
         )
 
         let command = CodexHookInstaller.hookCommand(for: installedHooksBinaryURL.path)
-        let featureMutation = CodexHookInstaller.enableCodexHooksFeature(in: existingConfig)
+        let featureMutation = CodexHookInstaller.enableCodexHooksFeature(
+            in: existingConfig,
+            preferredKey: featureKeyProvider()
+        )
         let hooksMutation = try CodexHookInstaller.installHooksJSON(existingData: existingHooks, hookCommand: command)
 
         if featureMutation.changed, fileManager.fileExists(atPath: configURL.path) {

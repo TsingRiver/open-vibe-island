@@ -17,6 +17,7 @@ enum IslandSessionPresence: Equatable {
 extension AgentSession {
     private static let collapsedDetailAgeThreshold: TimeInterval = 20 * 60
     private static let islandActivityThreshold: TimeInterval = 20 * 60
+    static let staleCompletedDisplayThreshold: TimeInterval = 5 * 60
 
     /// Whether this session represents a subagent (worktree agent) that should
     /// not appear as a separate entry in the session list.  The parent session
@@ -57,8 +58,7 @@ extension AgentSession {
             return request.affectedPath.isEmpty ? nil : request.affectedPath
         }
 
-        if let currentTool = currentToolName?.trimmedForSurface,
-           !currentTool.isEmpty {
+        if let currentTool = displayCurrentToolName {
             return phase == .completed
                 ? summary
                 : "Running \(currentTool)"
@@ -74,12 +74,7 @@ extension AgentSession {
     }
 
     var spotlightCurrentToolLabel: String? {
-        guard let currentTool = currentToolName?.trimmedForSurface,
-              !currentTool.isEmpty else {
-            return nil
-        }
-
-        return currentTool
+        displayCurrentToolName
     }
 
     var spotlightTrackingLabel: String? {
@@ -137,7 +132,17 @@ extension AgentSession {
     }
 
     var spotlightWorktreeBranch: String? {
-        claudeMetadata?.worktreeBranch
+        if let branch = claudeMetadata?.worktreeBranch?.trimmedForSurface,
+           !branch.isEmpty {
+            return branch
+        }
+
+        guard let workingDirectory = jumpTarget?.workingDirectory?.trimmedForSurface,
+              !workingDirectory.isEmpty else {
+            return nil
+        }
+
+        return WorkspaceNameResolver.gitBranch(for: workingDirectory)
     }
 
     var spotlightSubagentLabel: String? {
@@ -180,6 +185,31 @@ extension AgentSession {
         return "You: \(prompt)"
     }
 
+    var completionReplyRecipientName: String {
+        switch tool {
+        case .claudeCode:
+            return "Claude"
+        case .codex:
+            return "Codex"
+        case .geminiCLI:
+            return "Gemini"
+        case .openCode:
+            return "OpenCode"
+        case .qoder:
+            return "Qoder"
+        case .qwenCode:
+            return "Qwen Code"
+        case .factory:
+            return "Factory"
+        case .codebuddy:
+            return "CodeBuddy"
+        case .cursor:
+            return "Cursor"
+        case .kimiCLI:
+            return "Kimi"
+        }
+    }
+
     var notificationHeaderPromptLineText: String? {
         guard phase != .completed else {
             return nil
@@ -208,7 +238,7 @@ extension AgentSession {
             if let activity = spotlightRunningActivityText {
                 return activity
             }
-            return spotlightPromptLineText == nil ? "Running" : "Input"
+            return spotlightPromptLineText == nil ? "Running" : "Thinking"
         case .waitingForApproval:
             return permissionRequest?.summary.trimmedForSurface ?? "Approval needed"
         case .waitingForAnswer:
@@ -291,13 +321,23 @@ extension AgentSession {
         return .inactive
     }
 
+    /// v8 UI-only staleness: keep `SessionPhase.completed` unchanged, but
+    /// visually fold older completed rows into the low-priority presentation.
+    func isStaleCompletedForIsland(
+        at referenceDate: Date,
+        threshold: TimeInterval = Self.staleCompletedDisplayThreshold
+    ) -> Bool {
+        phase == .completed
+            && referenceDate.timeIntervalSince(islandActivityDate) >= threshold
+    }
+
     private var spotlightRunningActivityText: String? {
         guard let currentTool = currentToolName?.trimmedForSurface,
               !currentTool.isEmpty else {
             return nil
         }
 
-        let label = currentToolDisplayName(for: currentTool)
+        let label = Self.currentToolDisplayName(for: currentTool)
         guard let preview = currentCommandPreviewText?.trimmedForSurface,
               !preview.isEmpty else {
             return label
@@ -306,7 +346,16 @@ extension AgentSession {
         return "\(label) \(preview)"
     }
 
-    private func currentToolDisplayName(for toolName: String) -> String {
+    var displayCurrentToolName: String? {
+        guard let currentTool = currentToolName?.trimmedForSurface,
+              !currentTool.isEmpty else {
+            return nil
+        }
+
+        return Self.currentToolDisplayName(for: currentTool)
+    }
+
+    static func currentToolDisplayName(for toolName: String) -> String {
         switch toolName {
         case "exec_command":
             return "Bash"
@@ -320,9 +369,37 @@ extension AgentSession {
             return "Patch"
         case "write_stdin":
             return "Input"
+        case "web_search", "tool_search":
+            return "Search"
+        case "image_generation", "view_image":
+            return "Image"
+        case "context_compaction":
+            return "Compact"
+        case "update_plan":
+            return "Plan"
+        case "request_user_input":
+            return "Question"
+        case "spawn_agent":
+            return "Subagent"
         default:
-            return toolName
+            return humanizedToolName(toolName)
         }
+    }
+
+    private static func humanizedToolName(_ toolName: String) -> String {
+        let trimmed = toolName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutPrivatePrefix = String(trimmed.drop(while: { $0 == "_" }))
+        let pieces = withoutPrivatePrefix
+            .split(separator: "_", omittingEmptySubsequences: true)
+            .map { piece -> String in
+                let upper = piece.uppercased()
+                if ["API", "CI", "ID", "PR", "URL"].contains(upper) {
+                    return upper
+                }
+                return piece.prefix(1).uppercased() + piece.dropFirst().lowercased()
+            }
+        let label = pieces.joined(separator: " ")
+        return label.isEmpty ? toolName : label
     }
 
     private var initialPromptText: String? {

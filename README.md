@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Assets/Brand/app-icon-cat.png" alt="Open Island" width="128" height="128">
+  <img src="docs/images/readme-banner.svg" alt="Open Island - agents in your menu bar" width="760">
 </p>
 
 <h1 align="center">Open Island</h1>
@@ -62,7 +62,7 @@ Think of it as an open-source [Vibe Island](https://vibeisland.app/) — **free,
 | Agent | Status | Description |
 |---|---|---|
 | **Claude Code** | Supported | Hook integration, JSONL session discovery, status line bridge, usage tracking |
-| **Codex** (CLI) | Supported | Full hook integration (SessionStart, UserPromptSubmit, Stop), usage tracking |
+| **Codex** (CLI) | Supported | Hook integration (SessionStart, UserPromptSubmit, Stop by default; PreToolUse/PostToolUse parseable but not default), usage tracking |
 | **Codex Desktop App** | Supported | Hook integration + app-server JSON-RPC connection for real-time thread/turn lifecycle. Precise conversation jump via `codex://threads/<id>` deep-link |
 | **OpenCode** | Supported | JS plugin integration, permission/question flows, process detection |
 | **Qoder** | Supported | Claude Code fork — same hook format, config at `~/.qoder/settings.json` |
@@ -97,7 +97,7 @@ Think of it as an open-source [Vibe Island](https://vibeisland.app/) — **free,
 | Feature | Description |
 |---|---|
 | Notch / top-bar overlay | Notch area on notch Macs, top-center bar on others |
-| Control center | Hook status, usage dashboard |
+| Settings | Hook install/uninstall, usage dashboard |
 | Notification mode | Auto-height panel for permission requests and session events |
 | Notification sounds | Configurable system sounds, mute toggle |
 | i18n | English, Simplified Chinese |
@@ -113,7 +113,15 @@ Think of it as an open-source [Vibe Island](https://vibeisland.app/) — **free,
 
 Grab the latest DMG from [GitHub Releases](https://github.com/Octane0411/open-vibe-island/releases) — signed and notarized, ready to run.
 
-### Option 2: Build from source
+### Option 2: Homebrew
+
+```bash
+brew install --cask octane0411/tap/openisland
+```
+
+Upgrade later with `brew upgrade --cask openisland`.
+
+### Option 3: Build from source
 
 ```bash
 git clone https://github.com/Octane0411/open-vibe-island.git
@@ -121,7 +129,7 @@ cd open-vibe-island
 open Package.swift   # Opens in Xcode — hit Run
 ```
 
-On first launch, Open Island auto-discovers your active agent sessions and starts the live bridge. Hook installation is managed from the **Control Center** inside the app.
+On first launch, Open Island auto-discovers your active agent sessions and starts the live bridge. Hook installation is managed from the **Settings** window inside the app.
 
 > **Requirements**: macOS 14+, Swift 6.2, Xcode
 
@@ -148,7 +156,7 @@ Four targets in one Swift package:
 
 | Target | Role |
 |---|---|
-| **OpenIslandApp** | SwiftUI + AppKit shell — menu bar, overlay panel, control center, settings |
+| **OpenIslandApp** | SwiftUI + AppKit shell — menu bar, overlay panel, settings |
 | **OpenIslandCore** | Shared library — models, bridge transport (Unix socket IPC), hooks, session persistence |
 | **OpenIslandHooks** | Lightweight CLI invoked by agent hooks, forwards payloads via Unix socket |
 | **OpenIslandSetup** | Installer CLI for managing `~/.codex/config.toml` and hook entries |
@@ -220,7 +228,7 @@ Repository: Octane0411/open-vibe-island
 
 <a href="https://github.com/Octane0411/open-vibe-island/graphs/contributors">
   <!-- CONTRIBUTORS-IMG:START -->
-  <img src="https://contrib.rocks/image?repo=Octane0411/open-vibe-island&t=1776857788" />
+  <img src="https://contrib.rocks/image?repo=Octane0411/open-vibe-island&t=1778349385" />
   <!-- CONTRIBUTORS-IMG:END -->
 </a>
 
@@ -251,7 +259,7 @@ Developers who already live in the terminal and want a better way to work with c
 
 ### Agent Integrations
 
-- **Codex CLI** — Full hook-based integration. Receives `SessionStart`, `UserPromptSubmit`, and `Stop` events by default. Reads 5-hour and 7-day account usage windows from local rollout files. Install/uninstall managed hooks from the control center or CLI.
+- **Codex CLI** — Hook-based integration. The Codex CLI managed installer installs `SessionStart`, `UserPromptSubmit`, and `Stop` by default to keep the terminal workflow low-noise. Open Island can parse richer Codex hook events such as `PreToolUse` and `PostToolUse` when configured manually, but those events are not part of the default managed installation. Codex file edits may use internal apply-patch paths, so file-edit approval should not be treated as guaranteed `PreToolUse` coverage. Reads 5-hour and 7-day account usage windows from local rollout files. Install/uninstall managed hooks from the Settings window or CLI.
 - **Codex Desktop App** — Detected via `__CFBundleIdentifier`; hook sessions tagged as `isCodexAppSession` so they follow desktop-app liveness (tied to `NSWorkspace.shared.runningApplications` rather than the CLI subprocess that exits after each turn). In addition to hooks, Open Island launches its own `codex app-server` subprocess and speaks JSON-RPC over stdio to receive live `thread/started`, `turn/started`, `turn/completed`, and `thread/closed` notifications. Clicking a session opens the exact conversation via the `codex://threads/<id>` URL scheme.
 - **Claude Code** — Hook-based integration via `~/.claude/settings.json`. Discovers sessions from `~/.claude/projects/` JSONL transcripts. Persists and restores sessions across app launches. Managed status line bridge with opt-in installation. Reads cached 5-hour and 7-day usage windows.
 - **OpenCode** — JS plugin integration via `~/.config/opencode/plugins/`. Plugin auto-installed on first launch. Receives session lifecycle, tool use, permission, and question events. Permission approval and question answering flows supported. Process detection via `ps`.
@@ -261,7 +269,7 @@ Developers who already live in the terminal and want a better way to work with c
 - **CodeBuddy** — Claude Code fork. Same hook format and events via `~/.codebuddy/settings.json`. Use `--source codebuddy` with the hooks binary.
 - **Cursor** — Hook-based integration via `~/.cursor/hooks.json`. Receives `beforeSubmitPrompt`, `beforeShellExecution`, `beforeMCPExecution`, `beforeReadFile`, `afterFileEdit`, and `stop` events. Session persistence across app launches. Workspace jump-back via `cursor -r`. Use `--source cursor` with the hooks binary.
 - **Gemini CLI** — Hook-based integration via `~/.gemini/settings.json`. Receives `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, and `UserPromptSubmit` events. Fire-and-forget (no block/deny). Use `--source gemini` with the hooks binary.
-- **Kimi CLI** — Hook-based integration via `~/.kimi/config.toml` `[[hooks]]` array (Moonshot AI). Kimi's hook payload is byte-compatible with Claude Code, so Open Island reuses the Claude decode path and adds a dedicated TOML installer. Subscribes to `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `PreToolUse`, and `PostToolUse`. Requires the Kimi CLI Hooks Beta. Use `--source kimi` with the hooks binary. Manage installation from the Control Center, or via CLI:
+- **Kimi CLI** — Hook-based integration via `~/.kimi/config.toml` `[[hooks]]` array (Moonshot AI). Kimi's hook payload is byte-compatible with Claude Code, so Open Island reuses the Claude decode path and adds a dedicated TOML installer. Subscribes to `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `PreToolUse`, and `PostToolUse`. Requires the Kimi CLI Hooks Beta. Use `--source kimi` with the hooks binary. Manage installation from the Settings window, or via CLI:
 
   ```sh
   swift run OpenIslandSetup installKimi    # write [[hooks]] entries into ~/.kimi/config.toml
@@ -279,8 +287,7 @@ Developers who already live in the terminal and want a better way to work with c
 ### UI & Display
 
 - **Notch overlay** — On Macs with a built-in notch, the island sits in the notch area; on external displays or non-notch Macs, it falls back to a compact top-center bar
-- **Control center** — Codex/Claude hook status, usage dashboard, debug scenarios
-- **Settings** — General, Display, Sound, Shortcuts, Lab (advanced), About
+- **Settings** — Hook install/uninstall, Codex/Claude usage dashboard, General, Display, Sound, Shortcuts, Lab (advanced), About
 - **Notification mode** — Auto-height notification panel for permission requests and session events
 - **Notification sounds** — Configurable system sounds (default: Bottle) with mute toggle
 - **i18n** — English and Simplified Chinese
@@ -298,7 +305,7 @@ Four targets in one Swift package:
 
 | Target | Role |
 |---|---|
-| **OpenIslandApp** | SwiftUI + AppKit shell — menu bar, overlay panel, control center, settings |
+| **OpenIslandApp** | SwiftUI + AppKit shell — menu bar, overlay panel, settings |
 | **OpenIslandCore** | Shared library — models, bridge transport (Unix socket IPC), hooks, session persistence |
 | **OpenIslandHooks** | Lightweight CLI invoked by agent hooks, forwards payloads via Unix socket |
 | **OpenIslandSetup** | Installer CLI for managing `~/.codex/config.toml` and hook entries |
@@ -323,7 +330,7 @@ That script creates `output/package/Open Island.app` and `output/package/Open Is
 
 Open the package in Xcode to run the macOS app target. On launch, the app restores its local cache, scans recent `~/.codex/sessions/**/rollout-*.jsonl` files for existing Codex sessions, and starts the live bridge for new hook events.
 
-The control center shows live Codex hook install status from `~/.codex`, and can install or uninstall managed hook entries directly. Installs copy the helper into `~/Library/Application Support/OpenIsland/bin/OpenIslandHooks` so repo renames do not break existing hooks.
+The Settings window shows live Codex hook install status from `~/.codex`, and can install or uninstall managed hook entries directly. Installs copy the helper into `~/Library/Application Support/OpenIsland/bin/OpenIslandHooks` so repo renames do not break existing hooks.
 
 ```bash
 swift build -c release --product OpenIslandHooks
@@ -334,7 +341,7 @@ swift run OpenIslandSetup uninstall
 
 #### Connect Claude Code
 
-Claude usage setup is available from the app's control center and remains opt-in. The bridge writes a managed `statusLine.command` to `~/.open-island/bin/open-island-statusline`, caches `rate_limits` into `/tmp/open-island-rl.json`, and refuses to overwrite an existing custom status line automatically.
+Claude usage setup is available from the app's Settings window and remains opt-in. The bridge writes a managed `statusLine.command` to `~/.open-island/bin/open-island-statusline`, caches `rate_limits` into `/tmp/open-island-rl.json`, and refuses to overwrite an existing custom status line automatically.
 
 ### Repository Map
 

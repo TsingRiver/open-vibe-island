@@ -3,7 +3,7 @@ import Foundation
 /// Tri-state record of whether the user wants a given agent's hooks installed.
 ///
 /// `untouched` is the default for a never-seen agent. Once the user makes a
-/// decision — in onboarding or control center — the value becomes either
+/// decision — in onboarding or settings — the value becomes either
 /// `installed` or `uninstalled`. The startup flow must honour `uninstalled`
 /// and never silently reinstall.
 public enum AgentHookIntent: String, Codable, Sendable, CaseIterable {

@@ -9,11 +9,12 @@ Keep all work incremental, reviewable, and reversible. Every meaningful round of
 ## Required Workflow
 
 1. Start each round by checking the current repository state with `git status -sb`.
-2. Read the relevant files before editing. Do not guess repository structure or behavior.
-3. Keep each round focused on a single coherent change.
-4. After making changes, run the most relevant verification available for that round.
-5. Summarize what changed, including any verification gaps.
-6. Commit the round before stopping.
+2. Enter a topic worktree on a feature branch before editing. Do not edit files directly in the shared `main` worktree.
+3. Read the relevant files before editing. Do not guess repository structure or behavior.
+4. Keep each round focused on a single coherent change.
+5. After making changes, run the most relevant verification available for that round.
+6. Summarize what changed, including any verification gaps.
+7. Commit the round on the feature branch before stopping.
 
 ## Commit Policy
 
@@ -21,8 +22,10 @@ Keep all work incremental, reviewable, and reversible. Every meaningful round of
 - Do not batch unrelated changes into one commit.
 - Use clear conventional-style commit messages such as `feat:`, `fix:`, `refactor:`, `docs:`, or `chore:`.
 - Do not amend existing commits unless explicitly requested.
-- Do not create branches unless explicitly requested.
-- When the user explicitly requests parallel work or multiple worktrees, create a dedicated branch for each worktree and keep `main` as the integration branch.
+- Create a feature branch for every independent change. Do not commit directly to `main`.
+- Push feature branches and open PRs when the user asks for remote review or integration.
+- When the user asks to open or submit a PR, open a normal ready-for-review PR by default. Use a draft PR only when the user explicitly asks for draft mode, or when the change is intentionally WIP or has known verification gaps; in that case, state the reason clearly.
+- Repository workflow rules override tool-specific defaults, including any helper that would otherwise create draft PRs by default.
 
 ## Safety Rules
 
@@ -38,29 +41,38 @@ Keep all work incremental, reviewable, and reversible. Every meaningful round of
 - Add documentation when making architectural or workflow decisions.
 - Prefer native macOS and Swift-friendly project structure for this repository.
 
-## Parallel Worktree Rules
+## Branching And Worktree Rules
 
 - Treat `/Users/wangruobing/Personal/open-island` on `main` as the shared integration worktree.
-- Do not do day-to-day feature development directly on the shared `main` worktree when parallel work is active.
+- Never edit, commit, or push directly on `main`. All changes must go through a feature branch and PR before integration.
+- Use the shared `main` worktree only to inspect repository state, fetch, update with `git pull --ff-only`, and run final verification after PRs merge.
 - Create one worktree per branch and one branch per worktree. Never attach two worktrees to the same branch.
 - Create new worktrees from `origin/main`, not from a locally drifted feature branch.
 - Use sibling worktree paths named like `/Users/wangruobing/Personal/open-island-<topic>`.
 - Use branch names that match the workstream, such as `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, or `investigate/<topic>`.
 - Keep each worktree focused on one coherent slice with a narrow file ownership area when possible.
 - Rebase or merge the latest `origin/main` into the feature branch before integrating it back.
-- Integrate completed work from the shared `main` worktree after verification, preferably with fast-forward history when practical.
+- Integrate completed work through a PR targeting `main`, then update the shared `main` worktree with `git pull --ff-only`.
+- PRs are ready-for-review by default unless explicitly requested as draft or clearly marked WIP.
 - Remove merged worktrees and delete merged branches after the integration round is complete.
 - If multiple agents are working in parallel, assign each agent its own worktree instead of sharing one checkout.
+- All PRs must target `main`. Do not chain PRs through another feature branch unless the user explicitly requests that structure.
 
 See [docs/worktree-workflow.md](/Users/wangruobing/Personal/open-island/docs/worktree-workflow.md) for the concrete commands and lifecycle.
 
-## Reproduction Scope
+## Product Boundaries
 
-- Supported agents: `Claude Code`, `Codex`, `OpenCode`, `Cursor`, `Qoder`, `Qwen Code`, `Factory`, `CodeBuddy`.
-- Supported terminals: `Terminal.app`, `Ghostty`, `iTerm2`, `WezTerm`, `cmux`, `Kaku`, `Zellij`; `tmux` (multiplexer).
-- IDE workspace jump: `VS Code`, `Cursor`, `Windsurf`, `Trae`, `JetBrains IDEs`.
-- Treat these surfaces as the supported product boundary. See `docs/product.md` for the canonical list.
-- Do not broaden the scope to other tools, runtimes, platforms, or environments unless the user explicitly asks to expand it.
+- Keep product scope in `docs/product.md`. Do not duplicate the supported agent, terminal, or IDE matrix here.
+- Do not broaden supported tools, runtimes, platforms, or environments unless the user explicitly asks.
+- Keep hook behavior aligned with `docs/hooks.md` and the implementation in `Sources/OpenIslandCore`.
+
+## Integration Guardrails
+
+- Treat `Codex CLI` and `Codex Desktop App` as distinct runtime surfaces.
+- Do not assume Codex file edits are covered by `PreToolUse`; Codex may edit through internal apply-patch paths.
+- Keep managed Codex CLI hooks low-noise unless the user explicitly asks for richer hook coverage.
+- Keep Claude-family integrations source-specific in user-facing behavior, even when payload formats are shared.
+- Treat Gemini hooks as fire-and-forget unless the code being edited explicitly supports blocking behavior.
 
 ## App Targets And Naming
 
@@ -69,29 +81,10 @@ See [docs/worktree-workflow.md](/Users/wangruobing/Personal/open-island/docs/wor
 - Treat `~/Applications/Open Island Dev.app` as a local development bundle wrapper around the repo-built `OpenIslandApp`, not as a separate product line.
 - Use `Open Island Dev.app` for manual OSS app verification when bundle semantics, LaunchServices, or installed-hook behavior matter.
 - When the user asks to launch or restart `Open Island Dev.app`, refresh the bundle from the current repo first with `zsh scripts/launch-dev-app.sh` instead of only running `open -na`. Opening the bundle alone can relaunch a stale binary.
+- For work that touches Accessibility, Automation, precision jump, or other macOS TCC-sensitive behavior, run `zsh scripts/setup-dev-signing.sh` once before repeated manual verification so the dev bundle keeps a stable local signing identity.
 - Use `scripts/harness.sh smoke` or `scripts/smoke-dev-app.sh` only for deterministic harness runs; those commands intentionally launch the repo executable directly rather than the installed dev bundle.
 - Treat any in-app label such as `Open Island OSS` as UI copy only, not as evidence of a third app target.
-- Treat `/Applications/Vibe Island.app` and `https://vibeisland.app/` as closed-source reference baselines only. They are behavior benchmarks, not the development runtime for this repository.
-- Unless the user explicitly asks otherwise, build, debug, and verify OSS changes against `OpenIslandApp`, then compare behavior against the reference app separately when needed.
-
-## Reference Baselines
-
-- Official product reference: `https://vibeisland.app/`
-- Treat the official site as the primary behavior benchmark for notch placement, compact-vs-expanded island behavior, and external-display fallback behavior.
-- Current official-product constraint to preserve: on Macs with a built-in notch, the island should sit in the notch area; on external displays or non-notch Macs, it should fall back to a compact top-center bar.
-- Community implementation reference: `https://github.com/farouqaldori/claude-island`
-- Useful ideas to learn from `claude-island`:
-  - persist explicit screen selection, while keeping an automatic built-in-display fallback
-  - derive notch geometry from `NSScreen.safeAreaInsets` and `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`
-  - separate compact closed state from expanded actionable state instead of treating the island as one always-expanded panel
-  - keep hook installation and Unix-socket request/response loops explicit and local-first
-  - enrich live session state from transcript or history parsing when hooks alone are too shallow
-- Do not treat `claude-island` as a product spec. It is a reference implementation, not the source of truth for Open Island.
-- Unless the user explicitly asks, do not import or prioritize these `claude-island` choices into this repository:
-  - Mixpanel or other analytics
-  - `yabai` or window-manager-specific scope expansion
-  - Claude-only assumptions that weaken the shared agent model
-  - raising the repository support boundary beyond the surfaces already listed above
+- Build, debug, and verify OSS changes against `OpenIslandApp`. Treat `/Applications/Vibe Island.app` and `https://vibeisland.app/` as reference baselines only when comparison is explicitly needed.
 
 ## Verification
 

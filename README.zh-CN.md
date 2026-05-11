@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Assets/Brand/app-icon-cat.png" alt="Open Island" width="128" height="128">
+  <img src="docs/images/readme-banner.svg" alt="Open Island - agents in your menu bar" width="760">
 </p>
 
 <h1 align="center">Open Island</h1>
@@ -62,7 +62,7 @@ Open Island 驻留在 Mac 的**刘海区域**（或顶部栏），为你的 AI c
 | Agent | 状态 | 说明 |
 |---|---|---|
 | **Claude Code** | 已支持 | Hook 集成、JSONL 会话发现、status line bridge、用量追踪 |
-| **Codex**（CLI） | 已支持 | 完整 hook 集成（SessionStart、UserPromptSubmit、Stop）、用量追踪 |
+| **Codex**（CLI） | 已支持 | Hook 集成（默认 SessionStart、UserPromptSubmit、Stop；PreToolUse/PostToolUse 可解析但非默认安装）、用量追踪 |
 | **Codex 桌面 App** | 已支持 | Hook 集成 + app-server JSON-RPC 直连，实时获取 thread/turn 生命周期。点击 session 通过 `codex://threads/<id>` 精确跳转到对应会话 |
 | **OpenCode** | 已支持 | JS 插件集成、权限/问答交互、进程检测 |
 | **Qoder** | 已支持 | Claude Code 分支——相同 hook 格式，配置位于 `~/.qoder/settings.json` |
@@ -97,7 +97,7 @@ Open Island 驻留在 Mac 的**刘海区域**（或顶部栏），为你的 AI c
 | 功能 | 说明 |
 |---|---|
 | 刘海 / 顶部栏覆盖层 | 刘海 Mac 在刘海区域，其他 Mac 顶部居中栏 |
-| 控制中心 | Hook 状态、用量仪表盘 |
+| 设置 | Hook 安装/卸载、用量仪表盘 |
 | 通知模式 | 自适应高度面板，用于权限请求和会话事件 |
 | 通知音效 | 可配置系统音效、静音切换 |
 | 国际化 | English、简体中文 |
@@ -113,7 +113,15 @@ Open Island 驻留在 Mac 的**刘海区域**（或顶部栏），为你的 AI c
 
 从 [GitHub Releases](https://github.com/Octane0411/open-vibe-island/releases) 下载最新 DMG——已签名公证，开箱即用。
 
-### 方式二：从源码构建
+### 方式二：Homebrew
+
+```bash
+brew install --cask octane0411/tap/openisland
+```
+
+后续升级用 `brew upgrade --cask openisland`。
+
+### 方式三：从源码构建
 
 ```bash
 git clone https://github.com/Octane0411/open-vibe-island.git
@@ -121,7 +129,7 @@ cd open-vibe-island
 open Package.swift   # 在 Xcode 中打开，点击 Run
 ```
 
-首次启动时，Open Island 会自动发现活跃的 agent 会话并启动 live bridge。Hook 安装在 app 内的**控制中心**管理。
+首次启动时，Open Island 会自动发现活跃的 agent 会话并启动 live bridge。Hook 安装在 app 内的**设置**窗口管理。
 
 > **系统要求**：macOS 14+、Swift 6.2、Xcode
 
@@ -148,7 +156,7 @@ Hooks **fail open**——如果 Open Island 没在运行，你的 agents 不受�
 
 | Target | 角色 |
 |---|---|
-| **OpenIslandApp** | SwiftUI + AppKit shell——菜单栏、覆盖面板、控制中心、设置 |
+| **OpenIslandApp** | SwiftUI + AppKit shell——菜单栏、覆盖面板、设置 |
 | **OpenIslandCore** | 共享库——模型、bridge 传输（Unix socket IPC）、hooks、会话持久化 |
 | **OpenIslandHooks** | 轻量 CLI，由 agent hooks 调用，通过 Unix socket 转发 payload |
 | **OpenIslandSetup** | 安装器 CLI，管理 `~/.codex/config.toml` 和 hook entries |
@@ -220,7 +228,7 @@ Hooks **fail open**——如果 Open Island 没在运行，你的 agents 不受�
 
 <a href="https://github.com/Octane0411/open-vibe-island/graphs/contributors">
   <!-- CONTRIBUTORS-IMG:START -->
-  <img src="https://contrib.rocks/image?repo=Octane0411/open-vibe-island&t=1776857788" />
+  <img src="https://contrib.rocks/image?repo=Octane0411/open-vibe-island&t=1778349385" />
   <!-- CONTRIBUTORS-IMG:END -->
 </a>
 
@@ -255,7 +263,7 @@ AI coding 正在成为日常开发流程的一部分，但围绕它的控制层�
 
 ### Agent 集成
 
-- **Codex CLI** — 完整的 hook 集成。默认接收 `SessionStart`、`UserPromptSubmit` 和 `Stop` 事件。从本地 rollout 文件读取 5 小时和 7 天 account usage windows。支持从控制中心或 CLI 安装/卸载受管 hooks。
+- **Codex CLI** — Hook 集成。Codex CLI 受管安装器默认只安装 `SessionStart`、`UserPromptSubmit` 和 `Stop`，以保持终端输出低噪声。Open Island 可以解析手动配置的 `PreToolUse` / `PostToolUse` 等更细粒度 Codex hook 事件，但这些事件不属于默认受管安装范围。Codex 文件编辑可能走内部 apply-patch 路径，因此不应把文件编辑审批描述为稳定的 `PreToolUse` 覆盖能力。从本地 rollout 文件读取 5 小时和 7 天 account usage windows。支持从设置窗口或 CLI 安装/卸载受管 hooks。
 - **Codex 桌面 App** — 通过 `__CFBundleIdentifier` 识别；hook session 标记为 `isCodexAppSession`，生命周期由 `NSWorkspace.shared.runningApplications` 判断（而不是每轮对话后退出的 CLI 子进程）。除 hook 外，Open Island 还会启动自己的 `codex app-server` 子进程，通过 stdio JSON-RPC 接收实时的 `thread/started`、`turn/started`、`turn/completed`、`thread/closed` 通知。点击 session 会通过 `codex://threads/<id>` URL scheme 精确打开对应对话。
 - **Claude Code** — 基于 hook 的集成，通过 `~/.claude/settings.json` 配置。从 `~/.claude/projects/` JSONL transcript 自动发现会话。跨应用启动持久化和恢复会话。受管 status line bridge，opt-in 安装。读取缓存的 5 小时和 7 天 usage windows。
 - **OpenCode** — JS 插件集成，通过 `~/.config/opencode/plugins/`。首次启动自动安装插件。接收会话生命周期、工具使用、权限和问答事件。支持权限审批和问答交互。通过 `ps` 进行进程检测。
@@ -265,7 +273,7 @@ AI coding 正在成为日常开发流程的一部分，但围绕它的控制层�
 - **CodeBuddy** — Claude Code 分支。相同 hook 格式和事件，配置位于 `~/.codebuddy/settings.json`。使用 `--source codebuddy` 调用 hooks binary。
 - **Cursor** — 基于 hook 的集成，通过 `~/.cursor/hooks.json` 配置。接收 `beforeSubmitPrompt`、`beforeShellExecution`、`beforeMCPExecution`、`beforeReadFile`、`afterFileEdit` 和 `stop` 事件。跨应用启动持久化会话。通过 `cursor -r` 跳回工作区。使用 `--source cursor` 调用 hooks binary。
 - **Gemini CLI** — 基于 hook 的集成，通过 `~/.gemini/settings.json` 配置。接收 `SessionStart`、`PreToolUse`、`PostToolUse`、`Stop` 和 `UserPromptSubmit` 事件。Fire-and-forget（无 block/deny）。使用 `--source gemini` 调用 hooks binary。
-- **Kimi CLI** — 基于 hook 的集成，通过 `~/.kimi/config.toml` 的 `[[hooks]]` 数组配置（Moonshot AI）。Kimi 的 hook payload 与 Claude Code 字段兼容，Open Island 复用 Claude 解码路径，仅新增了 TOML installer。订阅 `SessionStart`、`UserPromptSubmit`、`Stop`、`Notification`、`PreToolUse`、`PostToolUse`。需要 Kimi CLI Hooks Beta。使用 `--source kimi` 调用 hooks binary。可以从控制中心管理安装，或通过 CLI：
+- **Kimi CLI** — 基于 hook 的集成，通过 `~/.kimi/config.toml` 的 `[[hooks]]` 数组配置（Moonshot AI）。Kimi 的 hook payload 与 Claude Code 字段兼容，Open Island 复用 Claude 解码路径，仅新增了 TOML installer。订阅 `SessionStart`、`UserPromptSubmit`、`Stop`、`Notification`、`PreToolUse`、`PostToolUse`。需要 Kimi CLI Hooks Beta。使用 `--source kimi` 调用 hooks binary。可以从设置窗口管理安装，或通过 CLI：
 
   ```sh
   swift run OpenIslandSetup installKimi    # 把受管 [[hooks]] 条目写入 ~/.kimi/config.toml
@@ -283,8 +291,7 @@ AI coding 正在成为日常开发流程的一部分，但围绕它的控制层�
 ### UI 与显示
 
 - **刘海覆盖层** — 在有刘海的 Mac 上，island 位于刘海区域；在外接显示器或无刘海 Mac 上，降级为紧凑的顶部居中栏
-- **控制中心** — Codex/Claude hook 状态、用量仪表盘、调试场景
-- **设置** — 通用、显示、声音、快捷键、实验室（高级）、关于
+- **设置** — Hook 安装/卸载、Codex/Claude 用量仪表盘、通用、显示、声音、快捷键、实验室（高级）、关于
 - **通知模式** — 自适应高度的通知面板，用于权限请求和会话事件
 - **通知音效** — 可配置的系统音效（默认：Bottle），支持静音切换
 - **国际化** — 英文和简体中文
@@ -302,7 +309,7 @@ AI coding 正在成为日常开发流程的一部分，但围绕它的控制层�
 
 | Target | 角色 |
 |---|---|
-| **OpenIslandApp** | SwiftUI + AppKit shell — 菜单栏、覆盖面板、控制中心、设置 |
+| **OpenIslandApp** | SwiftUI + AppKit shell — 菜单栏、覆盖面板、设置 |
 | **OpenIslandCore** | 共享库 — 模型、bridge 传输（Unix socket IPC）、hooks、会话持久化 |
 | **OpenIslandHooks** | 轻量 CLI，由 agent hooks 调用，通过 Unix socket 转发 payload |
 | **OpenIslandSetup** | 安装器 CLI，管理 `~/.codex/config.toml` 和 hook entries |
@@ -327,7 +334,7 @@ zsh scripts/package-app.sh
 
 在 Xcode 中打开 package 并运行 macOS app target。启动时，app 会恢复本地缓存，扫描最近的 `~/.codex/sessions/**/rollout-*.jsonl` 文件来恢复已有 Codex sessions，然后启动 live bridge 接收新 hook events。
 
-控制中心展示来自 `~/.codex` 的实时 Codex hook 安装状态，并可直接安装或卸载受管 hook entries。安装过程会把 helper 复制到 `~/Library/Application Support/OpenIsland/bin/OpenIslandHooks`，repo 重命名不会破坏已有 hooks。
+设置窗口展示来自 `~/.codex` 的实时 Codex hook 安装状态，并可直接安装或卸载受管 hook entries。安装过程会把 helper 复制到 `~/Library/Application Support/OpenIsland/bin/OpenIslandHooks`，repo 重命名不会破坏已有 hooks。
 
 ```bash
 swift build -c release --product OpenIslandHooks
@@ -338,7 +345,7 @@ swift run OpenIslandSetup uninstall
 
 #### 连接 Claude Code
 
-Claude usage 设置可在 app 控制中心启用，保持 opt-in。bridge 会把受管 `statusLine.command` 写入 `~/.open-island/bin/open-island-statusline`，把 `rate_limits` 缓存到 `/tmp/open-island-rl.json`，不会自动覆盖已有的自定义 status line。
+Claude usage 设置可在 app 设置窗口启用，保持 opt-in。bridge 会把受管 `statusLine.command` 写入 `~/.open-island/bin/open-island-statusline`，把 `rate_limits` 缓存到 `/tmp/open-island-rl.json`，不会自动覆盖已有的自定义 status line。
 
 ### 仓库导航
 
