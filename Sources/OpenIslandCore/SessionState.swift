@@ -449,6 +449,41 @@ public struct SessionState: Equatable, Sendable {
         upsert(session)
     }
 
+    /// Demote `.running` sessions whose backing transcript file has been
+    /// silent past `staleAfter`. Recovers from missed Stop hooks — e.g. when
+    /// the bridge socket was briefly unavailable during an app restart and the
+    /// agent's Stop event was dropped, leaving a row stuck on "Running".
+    /// The caller supplies pre-stat'd transcript modification times so this
+    /// reducer stays pure.
+    /// - Parameters:
+    ///   - transcriptIdleAt: Map of session ID → last transcript mtime.
+    ///   - now: Reference time for the staleness check.
+    ///   - staleAfter: Seconds of transcript silence required before demoting.
+    /// - Returns: `true` if any session was demoted.
+    @discardableResult
+    public mutating func demoteStaleRunningSessions(
+        transcriptIdleAt: [String: Date],
+        now: Date,
+        staleAfter: TimeInterval
+    ) -> Bool {
+        var changed = false
+        for session in sessionsByID.values {
+            guard session.phase == .running,
+                  session.permissionRequest == nil,
+                  session.questionPrompt == nil,
+                  let mtime = transcriptIdleAt[session.id],
+                  now.timeIntervalSince(mtime) > staleAfter else {
+                continue
+            }
+            var updated = session
+            updated.phase = .completed
+            updated.updatedAt = now
+            upsert(updated)
+            changed = true
+        }
+        return changed
+    }
+
     /// Marks a session as archived only in the island UI. The session remains
     /// tracked so a future event with the same id can automatically unarchive it.
     /// - Parameter id: The stable session identifier to archive locally.
