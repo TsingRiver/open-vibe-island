@@ -56,6 +56,12 @@ final class ProcessMonitoringCoordinator {
 
     private static let cursorStalenessTimeout: TimeInterval = 600  // 10 minutes
 
+    /// A `.running` session whose backing transcript has been silent this long
+    /// is treated as a missed Stop hook (e.g. bridge dropped during app restart)
+    /// and demoted to `.completed`. Streaming Claude/Codex turns write to the
+    /// transcript continuously, so silence beyond this window means idle.
+    private static let staleRunningTranscriptSilence: TimeInterval = 60
+
     private var state: SessionState {
         get { stateAccessor?() ?? SessionState() }
         set { stateUpdater?(newValue) }
@@ -78,18 +84,21 @@ final class ProcessMonitoringCoordinator {
                 let probe = self.terminalSessionAttachmentProbe
                 let resolver = self.terminalJumpTargetResolver
                 let liveSessions = self.state.sessions.filter(\.isTrackedLiveSession)
-                let (snapshots, ghosttyAvail, terminalAvail, jumpTargets) = await Task.detached(priority: .utility) {
+                let runningTranscriptPaths = Self.transcriptPathsForRunningSessions(liveSessions)
+                let (snapshots, ghosttyAvail, terminalAvail, jumpTargets, transcriptIdleAt) = await Task.detached(priority: .utility) {
                     let s = discovery.discover()
                     let g = probe.ghosttySnapshotAvailability()
                     let t = probe.terminalSnapshotAvailability()
                     let j = resolver.resolveJumpTargets(for: liveSessions, activeProcesses: s)
-                    return (s, g, t, j)
+                    let m = Self.transcriptModificationDates(for: runningTranscriptPaths)
+                    return (s, g, t, j, m)
                 }.value
                 self.reconcileSessionAttachments(
                     activeProcesses: snapshots,
                     ghosttyAvailability: ghosttyAvail,
                     terminalAvailability: terminalAvail,
-                    preResolvedJumpTargets: jumpTargets
+                    preResolvedJumpTargets: jumpTargets,
+                    transcriptIdleAt: transcriptIdleAt
                 )
                 try? await Task.sleep(for: .seconds(2))
             }
@@ -102,7 +111,8 @@ final class ProcessMonitoringCoordinator {
         activeProcesses: [ActiveProcessSnapshot]? = nil,
         ghosttyAvailability: TerminalSessionAttachmentProbe.SnapshotAvailability<TerminalSessionAttachmentProbe.GhosttyTerminalSnapshot>? = nil,
         terminalAvailability: TerminalSessionAttachmentProbe.SnapshotAvailability<TerminalSessionAttachmentProbe.TerminalTabSnapshot>? = nil,
-        preResolvedJumpTargets: [String: JumpTarget]? = nil
+        preResolvedJumpTargets: [String: JumpTarget]? = nil,
+        transcriptIdleAt: [String: Date]? = nil
     ) {
         let activeProcesses = activeProcesses ?? activeAgentProcessDiscovery.discover()
 
@@ -194,6 +204,17 @@ final class ProcessMonitoringCoordinator {
             )
         if !resolverJumpTargets.isEmpty {
             _ = local.reconcileJumpTargets(resolverJumpTargets)
+        }
+
+        // Demote `.running` sessions whose transcript has been silent past the
+        // configured window. Recovers from missed Stop hooks (e.g. when the
+        // bridge socket was unavailable during an app restart).
+        if let transcriptIdleAt, !transcriptIdleAt.isEmpty {
+            _ = local.demoteStaleRunningSessions(
+                transcriptIdleAt: transcriptIdleAt,
+                now: .now,
+                staleAfter: Self.staleRunningTranscriptSilence
+            )
         }
 
         // Phase 4: remove sessions that are no longer visible.
@@ -618,6 +639,40 @@ final class ProcessMonitoringCoordinator {
             }
             return lhsDate < rhsDate
         }
+    }
+
+    /// Collects transcript paths for sessions currently in `.running` phase so
+    /// the polling loop can stat them off the main thread.
+    /// - Parameter sessions: Snapshot of live sessions captured on the main actor.
+    /// - Returns: Map of session ID → transcript path. Sessions without a
+    ///   transcript path or not in `.running` phase are omitted.
+    nonisolated static func transcriptPathsForRunningSessions(_ sessions: [AgentSession]) -> [String: String] {
+        var result: [String: String] = [:]
+        for session in sessions where session.phase == .running {
+            let path = session.claudeMetadata?.transcriptPath
+                ?? session.codexMetadata?.transcriptPath
+                ?? session.geminiMetadata?.transcriptPath
+                ?? session.cursorMetadata?.transcriptPath
+            guard let path, !path.isEmpty else { continue }
+            result[session.id] = path
+        }
+        return result
+    }
+
+    /// Reads transcript modification dates off the main thread.
+    /// - Parameter paths: Map of session ID → transcript file path.
+    /// - Returns: Map of session ID → last-modified date. Missing files are dropped.
+    nonisolated static func transcriptModificationDates(for paths: [String: String]) -> [String: Date] {
+        var result: [String: Date] = [:]
+        let fm = FileManager.default
+        for (sessionID, path) in paths {
+            guard let attrs = try? fm.attributesOfItem(atPath: path),
+                  let mtime = attrs[.modificationDate] as? Date else {
+                continue
+            }
+            result[sessionID] = mtime
+        }
+        return result
     }
 
     /// Reads a file modification date without throwing into the polling loop.

@@ -1267,6 +1267,118 @@ struct SessionStateTests {
     }
 }
 
+struct SessionStateDemoteTests {
+    @Test
+    func demotesStaleRunningSessionsPastSilenceWindow() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var state = SessionState()
+        state.apply(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: "claude-stale",
+                    title: "Stale",
+                    tool: .claudeCode,
+                    summary: "Working",
+                    timestamp: now.addingTimeInterval(-300)
+                )
+            )
+        )
+        state.apply(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: "claude-stale",
+                    summary: "Streaming",
+                    phase: .running,
+                    timestamp: now.addingTimeInterval(-300)
+                )
+            )
+        )
+        #expect(state.session(id: "claude-stale")?.phase == .running)
+
+        let changed = state.demoteStaleRunningSessions(
+            transcriptIdleAt: ["claude-stale": now.addingTimeInterval(-120)],
+            now: now,
+            staleAfter: 60
+        )
+        #expect(changed)
+        #expect(state.session(id: "claude-stale")?.phase == .completed)
+    }
+
+    @Test
+    func keepsRunningSessionWithRecentTranscriptActivity() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var state = SessionState()
+        state.apply(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: "claude-live",
+                    title: "Live",
+                    tool: .claudeCode,
+                    summary: "Working",
+                    timestamp: now.addingTimeInterval(-300)
+                )
+            )
+        )
+        state.apply(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: "claude-live",
+                    summary: "Streaming",
+                    phase: .running,
+                    timestamp: now.addingTimeInterval(-300)
+                )
+            )
+        )
+
+        let changed = state.demoteStaleRunningSessions(
+            transcriptIdleAt: ["claude-live": now.addingTimeInterval(-5)],
+            now: now,
+            staleAfter: 60
+        )
+        #expect(!changed)
+        #expect(state.session(id: "claude-live")?.phase == .running)
+    }
+
+    @Test
+    func preservesActionableSessionsEvenWhenTranscriptIsSilent() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var state = SessionState()
+        state.apply(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: "claude-approval",
+                    title: "Approval",
+                    tool: .claudeCode,
+                    summary: "Working",
+                    timestamp: now.addingTimeInterval(-300)
+                )
+            )
+        )
+        // waitingForApproval phase — not running. Should be skipped even if mtime stale.
+        state.apply(
+            .permissionRequested(
+                PermissionRequested(
+                    sessionID: "claude-approval",
+                    request: PermissionRequest(
+                        title: "Edit file",
+                        summary: "Wants to edit",
+                        affectedPath: "src/main.swift"
+                    ),
+                    timestamp: now.addingTimeInterval(-200)
+                )
+            )
+        )
+
+        let changed = state.demoteStaleRunningSessions(
+            transcriptIdleAt: ["claude-approval": now.addingTimeInterval(-3_600)],
+            now: now,
+            staleAfter: 60
+        )
+        #expect(!changed)
+        #expect(state.session(id: "claude-approval")?.phase == .waitingForApproval)
+    }
+}
+
 private enum SessionStateTestError: Error {
     case streamEnded
 }
