@@ -118,6 +118,102 @@ struct ClaudeHooksTests {
     }
 
     @Test
+    func claudeTranscriptDiscoveryStreamsTranscriptsLargerThanReadChunk() throws {
+        // Pins streaming behavior across read-chunk boundaries. The
+        // pre-fix `parseSession` used `String(contentsOf:)` which on
+        // heavy Claude users (multi-hundred-MB transcripts) produced
+        // multi-GB startup peaks. The streamed reader must still
+        // recover the same final state when meaningful events sit
+        // beyond the first 64 KB chunk.
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-claude-discovery-stream-\(UUID().uuidString)", isDirectory: true)
+        let workspaceDirectory = rootURL
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent("-tmp-demo-repo", isDirectory: true)
+        let transcriptURL = workspaceDirectory.appendingPathComponent("session-large.jsonl")
+
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(at: workspaceDirectory, withIntermediateDirectories: true)
+
+        let header = """
+        {"cwd":"/tmp/demo-repo","sessionId":"session-large","type":"user","message":{"role":"user","content":"Initial prompt for the streamed transcript."},"timestamp":"2026-04-03T03:20:00Z"}
+        """
+
+        // Build a padded assistant message that, repeated many times,
+        // overshoots the 64 KB chunk boundary. The final assistant
+        // message must be recovered as the session summary.
+        let padding = String(repeating: "x", count: 256)
+        var lines: [String] = [header]
+        for index in 0..<400 {
+            lines.append("""
+            {"cwd":"/tmp/demo-repo","sessionId":"session-large","type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"padding \(index) \(padding)"}]},"timestamp":"2026-04-03T03:20:01Z"}
+            """)
+        }
+        lines.append("""
+        {"cwd":"/tmp/demo-repo","sessionId":"session-large","type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Streamed the large transcript end-to-end."}]},"timestamp":"2026-04-03T03:20:99Z"}
+        """)
+
+        let body = lines.joined(separator: "\n").appending("\n")
+        try body.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let fileSize = (try FileManager.default.attributesOfItem(atPath: transcriptURL.path)[.size] as? Int) ?? 0
+        #expect(fileSize > 64 * 1_024)
+
+        let discovery = ClaudeTranscriptDiscovery(rootURL: rootURL.appendingPathComponent("projects", isDirectory: true))
+        let sessions = discovery.discoverRecentSessions(
+            now: ISO8601DateFormatter().date(from: "2026-04-03T03:21:00Z")!
+        )
+
+        #expect(sessions.count == 1)
+        let session = try #require(sessions.first)
+        #expect(session.id == "session-large")
+        #expect(session.summary == "Streamed the large transcript end-to-end.")
+        #expect(session.claudeMetadata?.initialUserPrompt == "Initial prompt for the streamed transcript.")
+        #expect(session.claudeMetadata?.lastAssistantMessage == "Streamed the large transcript end-to-end.")
+    }
+
+    @Test
+    func claudeTranscriptDiscoveryHandlesTrailingLineWithoutNewline() throws {
+        // If Claude is killed mid-flush the final transcript line can
+        // land on disk without a trailing newline. The streamed reader
+        // must still surface it rather than dropping it like a naive
+        // split would.
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-claude-discovery-trailing-\(UUID().uuidString)", isDirectory: true)
+        let workspaceDirectory = rootURL
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent("-tmp-demo-repo", isDirectory: true)
+        let transcriptURL = workspaceDirectory.appendingPathComponent("session-trailing.jsonl")
+
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(at: workspaceDirectory, withIntermediateDirectories: true)
+
+        let lines = [
+            """
+            {"cwd":"/tmp/demo-repo","sessionId":"session-trailing","type":"user","message":{"role":"user","content":"Trailing line check."},"timestamp":"2026-04-03T03:20:00Z"}
+            """,
+            """
+            {"cwd":"/tmp/demo-repo","sessionId":"session-trailing","type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Final line without newline."}]},"timestamp":"2026-04-03T03:20:02Z"}
+            """,
+        ]
+
+        // Deliberately omit the trailing "\n".
+        try lines.joined(separator: "\n").write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let discovery = ClaudeTranscriptDiscovery(rootURL: rootURL.appendingPathComponent("projects", isDirectory: true))
+        let sessions = discovery.discoverRecentSessions(
+            now: ISO8601DateFormatter().date(from: "2026-04-03T03:20:10Z")!
+        )
+
+        #expect(sessions.count == 1)
+        let session = try #require(sessions.first)
+        #expect(session.id == "session-trailing")
+        #expect(session.claudeMetadata?.lastAssistantMessage == "Final line without newline.")
+    }
+
+    @Test
     func claudeGhosttyLocatorUsedForSessionStartAndPromptButNotToolUse() {
         let locator: (String) -> (sessionID: String?, tty: String?, title: String?) = { _ in
             (sessionID: "ghostty-frontmost", tty: nil, title: "claude ~/tmp/worktree")

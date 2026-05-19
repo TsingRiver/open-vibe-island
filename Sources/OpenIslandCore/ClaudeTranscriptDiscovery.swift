@@ -67,9 +67,16 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
     }
 
     private func parseSession(at fileURL: URL, fallbackUpdatedAt: Date) -> AgentSession? {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+        // Stream the transcript line by line. The original
+        // `String(contentsOf:)` slurped the entire jsonl, which on
+        // heavy Claude users (multi-hundred-MB transcripts) caused
+        // multi-GB startup peaks and OOMs on lower-RAM machines.
+        // Peak memory is now one chunk plus the accumulated session
+        // state.
+        guard let fileHandle = try? FileHandle(forReadingFrom: fileURL) else {
             return nil
         }
+        defer { try? fileHandle.close() }
 
         var sessionID = fileURL.deletingPathExtension().lastPathComponent
         var cwd: String?
@@ -82,10 +89,10 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
         var currentToolInputPreview: String?
         var pendingToolUses: [String: (name: String, preview: String?)] = [:]
 
-        for line in contents.split(separator: "\n") {
+        let processLine: (String) -> Void = { line in
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                continue
+                return
             }
 
             if let value = object["sessionId"] as? String, !value.isEmpty {
@@ -106,14 +113,14 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
             let role = message?["role"] as? String
 
             if role == "user" {
-                if let prompt = promptText(from: message?["content"]) {
+                if let prompt = self.promptText(from: message?["content"]) {
                     if initialUserPrompt == nil {
                         initialUserPrompt = prompt
                     }
                     lastUserPrompt = prompt
                 }
 
-                if let toolResultIDs = toolResultIDs(from: message?["content"]) {
+                if let toolResultIDs = self.toolResultIDs(from: message?["content"]) {
                     for toolResultID in toolResultIDs {
                         pendingToolUses.removeValue(forKey: toolResultID)
                     }
@@ -127,7 +134,7 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
                     }
                 }
             } else if role == "assistant" {
-                if let assistantText = assistantText(from: message?["content"]) {
+                if let assistantText = self.assistantText(from: message?["content"]) {
                     lastAssistantMessage = assistantText
                 }
 
@@ -135,7 +142,7 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
                     model = value
                 }
 
-                if let toolUses = toolUses(from: message?["content"]) {
+                if let toolUses = self.toolUses(from: message?["content"]) {
                     for toolUse in toolUses {
                         pendingToolUses[toolUse.id] = (name: toolUse.name, preview: toolUse.preview)
                     }
@@ -149,6 +156,23 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
                       let summary = object["summary"] as? String,
                       !summary.isEmpty {
                 lastAssistantMessage = summary
+            }
+        }
+
+        var buffer = Data()
+        while let chunk = try? fileHandle.read(upToCount: Self.streamingChunkSize),
+              !chunk.isEmpty {
+            buffer.append(chunk)
+            for line in extractCompleteLines(from: &buffer) {
+                processLine(line)
+            }
+        }
+
+        // Honor a final line written without a trailing newline.
+        if !buffer.isEmpty {
+            let trailing = String(decoding: buffer, as: UTF8.self)
+            if !trailing.isEmpty {
+                processLine(trailing)
             }
         }
 
@@ -187,6 +211,20 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
             ),
             claudeMetadata: metadata.isEmpty ? nil : metadata
         )
+    }
+
+    private static let streamingChunkSize = 64 * 1_024
+
+    private func extractCompleteLines(from buffer: inout Data) -> [String] {
+        let newline = UInt8(ascii: "\n")
+        var lines: [String] = []
+        while let newlineIndex = buffer.firstIndex(of: newline) {
+            let lineData = buffer.prefix(upTo: newlineIndex)
+            buffer.removeSubrange(...newlineIndex)
+            guard !lineData.isEmpty else { continue }
+            lines.append(String(decoding: lineData, as: UTF8.self))
+        }
+        return lines
     }
 
     private func promptText(from content: Any?) -> String? {

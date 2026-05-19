@@ -16,9 +16,15 @@ public final class BridgeServer: @unchecked Sendable {
     }
 
     private struct PendingClaudeToolContext {
+        let sessionID: String
         let toolUseID: String?
         let toolName: String?
         let toolInput: ClaudeHookJSONValue?
+    }
+
+    private struct PendingTaskCreation {
+        let sessionID: String
+        let tempID: String
     }
 
     private struct PendingClaudeInteraction {
@@ -66,7 +72,7 @@ public final class BridgeServer: @unchecked Sendable {
     /// Caches Agent tool description from preToolUse for use by the next subagentStart.
     private var pendingAgentDescriptions: [String: String] = [:]
     /// Maps toolUseID → temporary task ID for TaskCreate, so postToolUse can update with real ID.
-    private var pendingTaskCreations: [String: String] = [:]
+    private var pendingTaskCreations: [String: PendingTaskCreation] = [:]
     private var stateSnapshot = SessionState()
     /// Local working state: tracks sessions emitted by this server between
     /// snapshot pushes from AppModel. This is NOT a duplicate of AppModel's
@@ -175,6 +181,8 @@ public final class BridgeServer: @unchecked Sendable {
         pendingApprovals.removeAll()
         pendingClaudeInteractions.removeAll()
         pendingClaudeToolContexts.removeAll()
+        pendingAgentDescriptions.removeAll()
+        pendingTaskCreations.removeAll()
         pendingOpenCodeInteractions.removeAll()
         pendingCursorInteractions.removeAll()
 
@@ -606,6 +614,7 @@ public final class BridgeServer: @unchecked Sendable {
             synchronizeClaudeJumpTarget(for: payload)
             synchronizeClaudeMetadata(for: payload)
             pendingClaudeToolContexts[payload.permissionCorrelationKey] = PendingClaudeToolContext(
+                sessionID: payload.sessionID,
                 toolUseID: payload.toolUseID,
                 toolName: payload.toolName,
                 toolInput: payload.toolInput
@@ -625,7 +634,10 @@ public final class BridgeServer: @unchecked Sendable {
                 if toolName == "TaskCreate" {
                     let tempID = updateTask(from: obj, toolName: toolName, sessionID: payload.sessionID)
                     if let tempID, let toolUseID = payload.toolUseID {
-                        pendingTaskCreations[toolUseID] = tempID
+                        pendingTaskCreations[toolUseID] = PendingTaskCreation(
+                            sessionID: payload.sessionID,
+                            tempID: tempID
+                        )
                     }
                 } else if toolName == "TaskUpdate" {
                     _ = updateTask(from: obj, toolName: toolName, sessionID: payload.sessionID)
@@ -703,10 +715,10 @@ public final class BridgeServer: @unchecked Sendable {
             // After TaskCreate completes, update the temporary ID with the real task_id from the response
             if payload.toolName == "TaskCreate",
                let toolUseID = payload.toolUseID,
-               let tempID = pendingTaskCreations.removeValue(forKey: toolUseID) {
+               let pending = pendingTaskCreations.removeValue(forKey: toolUseID) {
                 replaceTaskID(
                     sessionID: payload.sessionID,
-                    tempID: tempID,
+                    tempID: pending.tempID,
                     response: payload.toolResponse
                 )
             }
@@ -810,6 +822,7 @@ public final class BridgeServer: @unchecked Sendable {
 
             // Turn is complete — all subagents from this turn must be finished.
             clearAllActiveSubagents(fromSession: payload.sessionID)
+            dropPendingClaudeContexts(forSession: payload.sessionID)
 
             emit(
                 .sessionCompleted(
@@ -831,6 +844,7 @@ public final class BridgeServer: @unchecked Sendable {
 
             // Turn failed — all subagents from this turn must be finished.
             clearAllActiveSubagents(fromSession: payload.sessionID)
+            dropPendingClaudeContexts(forSession: payload.sessionID)
 
             emit(
                 .sessionCompleted(
@@ -924,6 +938,7 @@ public final class BridgeServer: @unchecked Sendable {
 
             // Session is ending — clean up any lingering subagents.
             clearAllActiveSubagents(fromSession: payload.sessionID)
+            dropPendingClaudeContexts(forSession: payload.sessionID)
 
             emit(
                 .sessionCompleted(
@@ -2073,6 +2088,46 @@ public final class BridgeServer: @unchecked Sendable {
                 )
             )
         )
+    }
+
+    /// Drops cached preToolUse/Agent/TaskCreate context for a session.
+    ///
+    /// Normal pre→post pairs self-clean at `postToolUse`. When Claude
+    /// is interrupted between pre and post (Ctrl-C, crash, network drop)
+    /// the entries would otherwise pin large `toolInput` payloads in
+    /// memory until the app restarts. Called on `.stop` / `.stopFailure`
+    /// / `.sessionEnd`, by which point any in-flight tool for this
+    /// session is provably dead.
+    private func dropPendingClaudeContexts(forSession sessionID: String) {
+        pendingClaudeToolContexts = pendingClaudeToolContexts.filter { _, context in
+            context.sessionID != sessionID
+        }
+        pendingTaskCreations = pendingTaskCreations.filter { _, pending in
+            pending.sessionID != sessionID
+        }
+        pendingAgentDescriptions.removeValue(forKey: sessionID)
+    }
+
+    struct PendingClaudeStateSnapshot: Sendable, Equatable {
+        let toolContextCount: Int
+        let agentDescriptionCount: Int
+        let taskCreationCount: Int
+
+        var totalCount: Int {
+            toolContextCount + agentDescriptionCount + taskCreationCount
+        }
+    }
+
+    /// Test-only accessor for verifying pending-context cleanup. Goes
+    /// through the bridge's serial queue so the read is consistent.
+    func pendingClaudeStateSnapshotForTests() -> PendingClaudeStateSnapshot {
+        queue.sync {
+            PendingClaudeStateSnapshot(
+                toolContextCount: pendingClaudeToolContexts.count,
+                agentDescriptionCount: pendingAgentDescriptions.count,
+                taskCreationCount: pendingTaskCreations.count
+            )
+        }
     }
 
     /// Clears all active subagents from the session.

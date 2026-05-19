@@ -320,7 +320,10 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
         var recordsByID: [String: CodexTrackedSessionRecord] = [:]
         for candidate in recentCandidates {
-            guard let record = discoverRecord(fileURL: candidate.fileURL, modifiedAt: candidate.modifiedAt) else {
+            guard let record = discoverRecord(
+                fileURL: candidate.fileURL,
+                modifiedAt: candidate.modifiedAt
+            ) else {
                 continue
             }
 
@@ -340,20 +343,50 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         }
     }
 
-    private func discoverRecord(fileURL: URL, modifiedAt: Date) -> CodexTrackedSessionRecord? {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+    private func discoverRecord(
+        fileURL: URL,
+        modifiedAt: Date
+    ) -> CodexTrackedSessionRecord? {
+        // Stream the rollout line by line instead of slurping the whole
+        // file. Long-lived Codex sessions accumulate JSONL files of tens
+        // of MB; combined with the 10s rediscover throttle that meant a
+        // full-file `String(contentsOf:)` + `split` + `map(String.init)`
+        // every 10 seconds — high autorelease churn that pushed the app
+        // toward swap. Peak working set is now one chunk plus the
+        // accumulated `CodexRolloutSnapshot`.
+        guard let fileHandle = try? FileHandle(forReadingFrom: fileURL) else {
             return nil
         }
+        defer { try? fileHandle.close() }
 
-        let lines = contents
-            .split(whereSeparator: \.isNewline)
-            .map(String.init)
-        guard !lines.isEmpty,
-              let sessionMeta = sessionMeta(from: lines) else {
-            return nil
+        var snapshot = CodexRolloutSnapshot()
+        var sessionMeta: SessionMeta?
+        var buffer = Data()
+
+        while let chunk = try? fileHandle.read(upToCount: Self.streamingChunkSize),
+              !chunk.isEmpty {
+            buffer.append(chunk)
+            for line in extractCompleteLines(from: &buffer) {
+                CodexRolloutReducer.apply(line: line, to: &snapshot)
+                if sessionMeta == nil {
+                    sessionMeta = parseSessionMeta(fromLine: line)
+                }
+            }
         }
 
-        let snapshot = CodexRolloutReducer.snapshot(for: lines)
+        // A trailing line without a final newline should still count.
+        if !buffer.isEmpty {
+            let trailing = String(decoding: buffer, as: UTF8.self)
+            if !trailing.isEmpty {
+                CodexRolloutReducer.apply(line: trailing, to: &snapshot)
+                if sessionMeta == nil {
+                    sessionMeta = parseSessionMeta(fromLine: trailing)
+                }
+            }
+        }
+
+        guard let sessionMeta else { return nil }
+
         let summary = snapshot.summary ?? sessionMeta.defaultSummary
         let updatedAt = snapshot.updatedAt ?? sessionMeta.timestamp ?? modifiedAt
         let metadata = CodexSessionMetadata(
@@ -377,31 +410,41 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         )
     }
 
-    private func sessionMeta(from lines: [String]) -> SessionMeta? {
-        for line in lines {
-            guard let object = codexRolloutJSONObject(for: line),
-                  object["type"] as? String == "session_meta" else {
-                continue
-            }
+    private static let streamingChunkSize = 64 * 1_024
 
-            let payload = object["payload"] as? [String: Any] ?? [:]
-            guard let sessionID = payload["id"] as? String,
-                  !sessionID.isEmpty,
-                  let cwd = payload["cwd"] as? String,
-                  !cwd.isEmpty else {
-                continue
-            }
-
-            return SessionMeta(
-                sessionID: sessionID,
-                cwd: cwd,
-                timestamp: codexRolloutParseTimestamp(
-                    (payload["timestamp"] as? String) ?? (object["timestamp"] as? String)
-                )
-            )
+    private func parseSessionMeta(fromLine line: String) -> SessionMeta? {
+        guard let object = codexRolloutJSONObject(for: line),
+              object["type"] as? String == "session_meta" else {
+            return nil
         }
 
-        return nil
+        let payload = object["payload"] as? [String: Any] ?? [:]
+        guard let sessionID = payload["id"] as? String,
+              !sessionID.isEmpty,
+              let cwd = payload["cwd"] as? String,
+              !cwd.isEmpty else {
+            return nil
+        }
+
+        return SessionMeta(
+            sessionID: sessionID,
+            cwd: cwd,
+            timestamp: codexRolloutParseTimestamp(
+                (payload["timestamp"] as? String) ?? (object["timestamp"] as? String)
+            )
+        )
+    }
+
+    private func extractCompleteLines(from buffer: inout Data) -> [String] {
+        let newline = UInt8(ascii: "\n")
+        var lines: [String] = []
+        while let newlineIndex = buffer.firstIndex(of: newline) {
+            let lineData = buffer.prefix(upTo: newlineIndex)
+            buffer.removeSubrange(...newlineIndex)
+            guard !lineData.isEmpty else { continue }
+            lines.append(String(decoding: lineData, as: UTF8.self))
+        }
+        return lines
     }
 }
 

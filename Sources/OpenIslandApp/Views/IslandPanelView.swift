@@ -76,6 +76,7 @@ extension AgentSession {
 private let openAnimation = Animation.spring(response: 0.42, dampingFraction: 0.8, blendDuration: 0)
 private let closeAnimation = Animation.smooth(duration: 0.3)
 private let popAnimation = Animation.spring(response: 0.3, dampingFraction: 0.5)
+private let openedSurfaceUnmountDelay: TimeInterval = 0.36
 
 private struct ConditionalDrawingGroup: ViewModifier {
     let enabled: Bool
@@ -105,6 +106,8 @@ struct IslandPanelView: View {
 
     @State private var isHovering = false
     @State private var showingQuitConfirmation = false
+    @State private var keepsOpenedSurfaceMounted = false
+    @State private var openedSurfaceMountGeneration: UInt64 = 0
 
     private var isOpened: Bool {
         model.notchStatus == .opened
@@ -112,6 +115,10 @@ struct IslandPanelView: View {
 
     private var usesOpenedVisualState: Bool {
         isOpened
+    }
+
+    private var shouldRenderOpenedSurface: Bool {
+        usesOpenedVisualState || keepsOpenedSurfaceMounted
     }
 
     private var isPopping: Bool {
@@ -180,6 +187,12 @@ struct IslandPanelView: View {
         } message: {
             Text(model.lang.t("island.quit.confirmMessage"))
         }
+        .onAppear {
+            syncOpenedSurfaceMount(with: model.notchStatus, immediate: true)
+        }
+        .onChange(of: model.notchStatus) { _, status in
+            syncOpenedSurfaceMount(with: status)
+        }
     }
 
     @ViewBuilder
@@ -197,9 +210,11 @@ struct IslandPanelView: View {
 
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
-                openedSurface(width: openedWidth, height: openedHeight)
-                    .opacity(usesOpenedVisualState ? 1 : 0)
-                    .allowsHitTesting(usesOpenedVisualState)
+                if shouldRenderOpenedSurface {
+                    openedSurface(width: openedWidth, height: openedHeight)
+                        .opacity(usesOpenedVisualState ? 1 : 0)
+                        .allowsHitTesting(usesOpenedVisualState)
+                }
 
                 v6ClosedSurface()
                     .opacity(usesOpenedVisualState ? 0 : 1)
@@ -220,6 +235,29 @@ struct IslandPanelView: View {
         .onTapGesture {
             if model.notchStatus != .opened {
                 model.notchOpen(reason: .click)
+            }
+        }
+    }
+
+    private func syncOpenedSurfaceMount(with status: NotchStatus, immediate: Bool = false) {
+        openedSurfaceMountGeneration &+= 1
+        let generation = openedSurfaceMountGeneration
+
+        switch status {
+        case .opened:
+            keepsOpenedSurfaceMounted = true
+        case .closed, .popping:
+            guard !immediate else {
+                keepsOpenedSurfaceMounted = false
+                return
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + openedSurfaceUnmountDelay) {
+                guard openedSurfaceMountGeneration == generation,
+                      model.notchStatus != .opened else {
+                    return
+                }
+                keepsOpenedSurfaceMounted = false
             }
         }
     }

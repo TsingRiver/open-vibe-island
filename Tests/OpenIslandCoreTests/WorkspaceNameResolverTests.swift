@@ -49,6 +49,36 @@ struct WorkspaceNameResolverTests {
         #expect(WorkspaceNameResolver.gitBranch(for: cwd) == "feat/v8-design")
     }
 
+    @Test
+    func gitBranchCachesResultAcrossRepeatedLookups() throws {
+        // Pins the SwiftUI layout-loop fix: repeated lookups for the
+        // same cwd must hit the in-memory cache instead of re-walking
+        // the directory tree. Demonstrated by mutating HEAD between
+        // calls — without the cache the second call would surface the
+        // new branch immediately. With it, the cached value persists
+        // until the cache is dropped.
+        WorkspaceNameResolver.resetGitBranchCacheForTests()
+        defer { WorkspaceNameResolver.resetGitBranchCacheForTests() }
+
+        let repo = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: repo) }
+
+        let git = repo.appendingPathComponent(".git")
+        try FileManager.default.createDirectory(at: git, withIntermediateDirectories: true)
+        let headURL = git.appendingPathComponent("HEAD")
+        try "ref: refs/heads/cached-branch\n".write(to: headURL, atomically: true, encoding: .utf8)
+
+        #expect(WorkspaceNameResolver.gitBranch(for: repo.path) == "cached-branch")
+
+        // Mutate underlying HEAD; cache must mask the change.
+        try "ref: refs/heads/changed-branch\n".write(to: headURL, atomically: true, encoding: .utf8)
+        #expect(WorkspaceNameResolver.gitBranch(for: repo.path) == "cached-branch")
+
+        // After the cache is dropped the new branch is observed.
+        WorkspaceNameResolver.resetGitBranchCacheForTests()
+        #expect(WorkspaceNameResolver.gitBranch(for: repo.path) == "changed-branch")
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("WorkspaceNameResolverTests-\(UUID().uuidString)")

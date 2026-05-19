@@ -41,6 +41,19 @@ public enum WorkspaceNameResolver {
     }
 
     public static func gitBranch(for cwd: String) -> String? {
+        // SwiftUI computed properties (e.g. `IslandSessionRow.summaryHeadlineText`)
+        // call this on every layout pass. The walk-up-to-`.git` plus HEAD
+        // read is dozens of `fileExists` calls; in a layout loop that
+        // pegs CPU at 99 % until the layout settles. Cache results per
+        // cwd with a short TTL so repeated layout passes hit memory.
+        // 30 s is comfortably under any human-noticeable branch-switch
+        // latency while collapsing burst calls into one IO.
+        gitBranchCache.value(for: cwd, compute: uncachedGitBranch(for:))
+    }
+
+    private static let gitBranchCache = TimedCache<String, String?>(ttl: 30)
+
+    private static func uncachedGitBranch(for cwd: String) -> String? {
         if let worktreeBranch = worktreeBranch(for: cwd) {
             return worktreeBranch
         }
@@ -70,6 +83,11 @@ public enum WorkspaceNameResolver {
             }
             directory = parent
         }
+    }
+
+    /// Test-only hook to drop cached branch lookups between assertions.
+    static func resetGitBranchCacheForTests() {
+        gitBranchCache.removeAll()
     }
 
     private static func resolvedGitDirectory(fromGitFile gitFile: URL, relativeTo directory: URL) -> URL? {

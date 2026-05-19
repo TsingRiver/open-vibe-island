@@ -1011,6 +1011,135 @@ struct CodexSessionTrackingTests {
         #expect(records.first?.origin == .live)
         #expect(records.first?.attachmentState == .stale)
     }
+
+    @Test
+    func codexRolloutDiscoveryStreamsRolloutsLargerThanReadChunk() throws {
+        // Pins streaming behavior across read-chunk boundaries. The
+        // discovery path used to slurp the whole rollout via
+        // `String(contentsOf:)`, which on multi-MB files allocated
+        // 2–3× file size every 10s and pushed the app toward swap.
+        // The streamed reader must reassemble lines correctly when
+        // the meaningful events sit beyond the first 64 KB chunk.
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-discovery-stream-\(UUID().uuidString)", isDirectory: true)
+        let rolloutDirectoryURL = rootURL.appendingPathComponent("2026/04/02", isDirectory: true)
+        let rolloutURL = rolloutDirectoryURL.appendingPathComponent("rollout-large.jsonl")
+        let now = Date(timeIntervalSince1970: 1_743_555_200)
+
+        try FileManager.default.createDirectory(at: rolloutDirectoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        var lines: [String] = [
+            sessionMetaLine(
+                sessionID: "codex-session-large",
+                timestamp: "2026-04-02T04:03:44.000Z",
+                cwd: "/Users/wangruobing/Personal/open-island"
+            )
+        ]
+        // Pad with enough no-op `agent_message` lines to push the
+        // meaningful events past the 64 KB read-chunk boundary so
+        // the streaming loop must span at least two chunks.
+        let padding = String(repeating: "x", count: 256)
+        for index in 0..<800 {
+            lines.append(rolloutLine(
+                timestamp: "2026-04-02T04:03:45.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "agent_message",
+                    "message": "padding \(index) \(padding)",
+                ]
+            ))
+        }
+        lines.append(rolloutLine(
+            timestamp: "2026-04-02T04:03:46.000Z",
+            type: "event_msg",
+            payload: [
+                "type": "user_message",
+                "message": "Inspect the large rollout.",
+            ]
+        ))
+        lines.append(rolloutLine(
+            timestamp: "2026-04-02T04:03:46.500Z",
+            type: "event_msg",
+            payload: [
+                "type": "agent_message",
+                "message": "Streamed the large rollout end-to-end.",
+            ]
+        ))
+
+        let body = lines.joined(separator: "\n").appending("\n")
+        try body.write(to: rolloutURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: rolloutURL.path)
+
+        // Sanity-check the fixture genuinely exceeds the streaming
+        // chunk size, otherwise this test wouldn't prove anything.
+        let fileSize = (try FileManager.default.attributesOfItem(atPath: rolloutURL.path)[.size] as? Int) ?? 0
+        #expect(fileSize > 64 * 1_024)
+
+        let discovery = CodexRolloutDiscovery(
+            rootURL: rootURL,
+            fileManager: .default,
+            maxAge: 86_400,
+            maxFiles: 10
+        )
+
+        let records = discovery.discoverRecentSessions(now: now)
+
+        #expect(records.count == 1)
+        #expect(records.first?.sessionID == "codex-session-large")
+        #expect(records.first?.summary == "Streamed the large rollout end-to-end.")
+        #expect(records.first?.codexMetadata?.lastUserPrompt == "Inspect the large rollout.")
+        #expect(records.first?.codexMetadata?.lastAssistantMessage == "Streamed the large rollout end-to-end.")
+    }
+
+    @Test
+    func codexRolloutDiscoveryHandlesTrailingLineWithoutNewline() throws {
+        // A rollout written by Codex while the process is mid-flush
+        // can land on disk without a trailing newline. The streamed
+        // reader must still surface the final line's content rather
+        // than dropping it.
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-discovery-trailing-\(UUID().uuidString)", isDirectory: true)
+        let rolloutDirectoryURL = rootURL.appendingPathComponent("2026/04/02", isDirectory: true)
+        let rolloutURL = rolloutDirectoryURL.appendingPathComponent("rollout-trailing.jsonl")
+        let now = Date(timeIntervalSince1970: 1_743_555_200)
+
+        try FileManager.default.createDirectory(at: rolloutDirectoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let lines = [
+            sessionMetaLine(
+                sessionID: "codex-session-trailing",
+                timestamp: "2026-04-02T04:03:44.000Z",
+                cwd: "/Users/wangruobing/Personal/open-island"
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:45.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "agent_message",
+                    "message": "Final line without newline.",
+                ]
+            ),
+        ]
+
+        // Deliberately omit the trailing "\n".
+        try lines.joined(separator: "\n").write(to: rolloutURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: rolloutURL.path)
+
+        let discovery = CodexRolloutDiscovery(
+            rootURL: rootURL,
+            fileManager: .default,
+            maxAge: 86_400,
+            maxFiles: 10
+        )
+
+        let records = discovery.discoverRecentSessions(now: now)
+
+        #expect(records.count == 1)
+        #expect(records.first?.sessionID == "codex-session-trailing")
+        #expect(records.first?.codexMetadata?.lastAssistantMessage == "Final line without newline.")
+    }
 }
 
 private actor EventRecorder {

@@ -383,9 +383,6 @@ final class SessionDiscoveryCoordinator {
     @ObservationIgnored
     private var lastCodexAppRescanDate: Date = .distantPast
 
-    @ObservationIgnored
-    private var lastCodexCLIRescanDate: Date = .distantPast
-
     /// Re-scan `~/.codex/sessions/` for rollout files not yet tracked.
     /// Called periodically when Codex.app is running as a fallback when
     /// the app-server connection is unavailable.  Throttled to at most
@@ -403,45 +400,6 @@ final class SessionDiscoveryCoordinator {
                 self?.applyCodexAppRediscovery(discovered)
             }
         }
-    }
-
-    /// Re-scan `~/.codex/sessions/` for Codex CLI sessions created after app
-    /// startup. Codex can keep old rollout descriptors open after a thread is
-    /// completed, so process liveness alone cannot discover a newer session.
-    func rediscoverCodexCLISessionsIfNeeded(activeSessionIDs: Set<String>) {
-        guard !activeSessionIDs.isEmpty else { return }
-
-        let now = Date.now
-        guard now.timeIntervalSince(lastCodexCLIRescanDate) >= 10 else { return }
-        lastCodexCLIRescanDate = now
-
-        let discovery = codexRolloutDiscovery
-        Task.detached(priority: .utility) { [weak self] in
-            let discovered = discovery.discoverRecentSessions().filter {
-                activeSessionIDs.contains($0.sessionID)
-            }
-            guard !discovered.isEmpty else { return }
-            await MainActor.run { [weak self] in
-                self?.applyCodexCLIRediscovery(discovered)
-            }
-        }
-    }
-
-    private func applyCodexCLIRediscovery(_ records: [CodexTrackedSessionRecord]) {
-        let existingIDs = Set(state.sessions.filter { $0.tool == .codex }.map(\.id))
-        let existingPaths = Set(state.sessions.compactMap(\.codexMetadata?.transcriptPath))
-
-        let newRecords = records.filter { record in
-            !existingIDs.contains(record.sessionID)
-                && (record.codexMetadata?.transcriptPath).map { !existingPaths.contains($0) } ?? true
-        }
-        guard !newRecords.isEmpty else { return }
-
-        let merged = mergeDiscoveredSessions(newRecords.map(\.session))
-        state = SessionState(sessions: merged)
-        refreshCodexRolloutTracking()
-        scheduleCodexSessionPersistence()
-        onStatusMessage?("Discovered \(newRecords.count) new Codex CLI session(s) via rollout re-scan.")
     }
 
     private func applyCodexAppRediscovery(_ records: [CodexTrackedSessionRecord]) {
@@ -485,6 +443,22 @@ final class SessionDiscoveryCoordinator {
 
     // MARK: - Persistence scheduling
 
+    private static func persistenceTask(
+        operation: @escaping @Sendable () throws -> Void
+    ) -> Task<Void, Never> {
+        Task.detached(priority: .utility) {
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+                try Task.checkCancellation()
+                try operation()
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+        }
+    }
+
     func scheduleCodexSessionPersistence() {
         codexSessionPersistenceTask?.cancel()
 
@@ -493,9 +467,8 @@ final class SessionDiscoveryCoordinator {
             .map(CodexTrackedSessionRecord.init(session:))
         let store = codexSessionStore
 
-        codexSessionPersistenceTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .milliseconds(250))
-            try? store.save(records)
+        codexSessionPersistenceTask = Self.persistenceTask {
+            try store.save(records)
         }
     }
 
@@ -514,9 +487,8 @@ final class SessionDiscoveryCoordinator {
             .map(ClaudeTrackedSessionRecord.init(session:))
         let registry = claudeSessionRegistry
 
-        claudeSessionPersistenceTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .milliseconds(250))
-            try? registry.save(records)
+        claudeSessionPersistenceTask = Self.persistenceTask {
+            try registry.save(records)
         }
     }
 
@@ -532,9 +504,8 @@ final class SessionDiscoveryCoordinator {
             .map(OpenCodeTrackedSessionRecord.init(session:))
         let registry = openCodeSessionRegistry
 
-        openCodeSessionPersistenceTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .milliseconds(250))
-            try? registry.save(records)
+        openCodeSessionPersistenceTask = Self.persistenceTask {
+            try registry.save(records)
         }
     }
 
@@ -551,9 +522,8 @@ final class SessionDiscoveryCoordinator {
             .map(CursorTrackedSessionRecord.init(session:))
         let registry = cursorSessionRegistry
 
-        cursorSessionPersistenceTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .milliseconds(250))
-            try? registry.save(records)
+        cursorSessionPersistenceTask = Self.persistenceTask {
+            try registry.save(records)
         }
     }
 }

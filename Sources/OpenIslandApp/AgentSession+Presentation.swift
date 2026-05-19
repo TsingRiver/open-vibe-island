@@ -132,6 +132,21 @@ extension AgentSession {
     }
 
     var spotlightWorktreeBranch: String? {
+        // This is a SwiftUI computed property read on every layout
+        // pass. It MUST stay free of filesystem IO. Calling
+        // `WorkspaceNameResolver.gitBranch` here previously walked
+        // parent directories every layout, which combined with
+        // SwiftUI's measure/layout convergence cycle pinned the
+        // process at 99 % CPU during session-list rendering even
+        // with the resolver result cached.
+        //
+        // Read order: hook-supplied metadata wins (already resolved
+        // by `BridgeServer` from the hook payload), then the pure
+        // string-based worktree-path detector (no IO). Other
+        // sessions surface the workspace name without a branch
+        // suffix; for branch info on arbitrary `cwd` values to
+        // come back, it has to be resolved when the session is
+        // created or updated, not from the view body.
         if let branch = claudeMetadata?.worktreeBranch?.trimmedForSurface,
            !branch.isEmpty {
             return branch
@@ -142,7 +157,7 @@ extension AgentSession {
             return nil
         }
 
-        return WorkspaceNameResolver.gitBranch(for: workingDirectory)
+        return WorkspaceNameResolver.worktreeBranch(for: workingDirectory)
     }
 
     var spotlightSubagentLabel: String? {

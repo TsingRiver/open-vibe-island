@@ -209,9 +209,8 @@ struct AppearanceSettingsPane: View {
 
             Spacer(minLength: 0)
         }
-        .onAppear(perform: restartAutoCycleTick)
-        .onChange(of: previewAutoCycle) { _, on in
-            if on { restartAutoCycleTick() }
+        .task(id: previewAutoCycle) {
+            await runAutoCycle()
         }
     }
 
@@ -234,20 +233,19 @@ struct AppearanceSettingsPane: View {
         .padding(.top, 8)
     }
 
-    // Simple self-scheduling tick. We don't use `Timer.publish` so the
-    // cycle halts cleanly when the pane disappears (the captured
-    // `previewAutoCycle` state is read at each fire).
-    private func restartAutoCycleTick() {
+    private func runAutoCycle() async {
         guard previewAutoCycle else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoCycleInterval) {
-            guard previewAutoCycle else { return }
+
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(Int(Self.autoCycleInterval * 1_000)))
+            guard !Task.isCancelled, previewAutoCycle else { return }
+
             let order = Self.autoCycleOrder
             let current = order.firstIndex(of: previewMode) ?? 0
             let next = order[(current + 1) % order.count]
             withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45)) {
                 previewMode = next
             }
-            restartAutoCycleTick()
         }
     }
 

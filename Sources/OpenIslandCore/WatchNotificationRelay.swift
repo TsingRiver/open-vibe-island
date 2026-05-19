@@ -81,17 +81,24 @@ public final class WatchNotificationRelay: @unchecked Sendable {
             Self.logger.info("Pushed sessionCompleted for session \(payload.sessionID)")
 
         case let .actionableStateResolved(payload):
-            // Find and remove any pending request for this session, then notify iPhone
-            let requestID = removePendingRequestBySession(sessionID: payload.sessionID)
-            if let requestID {
-                let resolvedEvent = WatchSSEEvent.actionableStateResolved(WatchResolvedEvent(
-                    requestID: requestID,
-                    sessionID: payload.sessionID
-                ))
-                endpoint.pushEvent(resolvedEvent)
-                Self.logger.info("Pushed actionableStateResolved for request \(requestID)")
-            } else {
+            // Find and remove ALL pending requests for this session, notifying
+            // iPhone for each one. A single session can have multiple pending
+            // entries when subagents fan out permission/question prompts in
+            // parallel; the previous one-at-a-time removal silently leaked
+            // every entry past the first and left the watch UI showing stale
+            // pending requests.
+            let requestIDs = removeAllPendingRequests(forSession: payload.sessionID)
+            if requestIDs.isEmpty {
                 Self.logger.debug("No pending request found for resolved session \(payload.sessionID)")
+            } else {
+                for requestID in requestIDs {
+                    let resolvedEvent = WatchSSEEvent.actionableStateResolved(WatchResolvedEvent(
+                        requestID: requestID,
+                        sessionID: payload.sessionID
+                    ))
+                    endpoint.pushEvent(resolvedEvent)
+                }
+                Self.logger.info("Pushed actionableStateResolved for \(requestIDs.count) request(s) on session \(payload.sessionID)")
             }
 
         default:
@@ -123,14 +130,27 @@ public final class WatchNotificationRelay: @unchecked Sendable {
         }
     }
 
-    /// Finds and removes a pending request by sessionID. Returns the requestID if found.
-    private func removePendingRequestBySession(sessionID: String) -> String? {
+    /// Removes every pending request belonging to a session and returns
+    /// the cleared requestIDs in the order they were originally inserted
+    /// (best effort — `Dictionary` iteration order is undefined, so callers
+    /// must not rely on order for correctness).
+    private func removeAllPendingRequests(forSession sessionID: String) -> [String] {
         queue.sync {
-            guard let entry = pendingRequests.first(where: { $0.value.sessionID == sessionID }) else {
-                return nil
+            let matchingKeys = pendingRequests.compactMap { key, value in
+                value.sessionID == sessionID ? key : nil
             }
-            pendingRequests.removeValue(forKey: entry.key)
-            return entry.key
+            for key in matchingKeys {
+                pendingRequests.removeValue(forKey: key)
+            }
+            return matchingKeys
+        }
+    }
+
+    /// Test-only accessor for verifying pending-request cleanup.
+    func pendingRequestCountForTests(sessionID: String? = nil) -> Int {
+        queue.sync {
+            guard let sessionID else { return pendingRequests.count }
+            return pendingRequests.values.filter { $0.sessionID == sessionID }.count
         }
     }
 
