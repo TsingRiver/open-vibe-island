@@ -5,6 +5,26 @@ import OpenIslandCore
 
 typealias ActiveProcessSnapshot = ActiveAgentProcessDiscovery.ProcessSnapshot
 
+/// How often the session-attachment monitor scans running processes. Slower
+/// cadences trade a little detection latency (for agents started without a
+/// hook) for fewer `ps` scans and CPU wakeups — a battery-life lever the user
+/// controls from Settings.
+enum ProcessDiscoveryCadence: String, CaseIterable, Identifiable, Codable, Sendable {
+    case standard
+    case relaxed
+    case batterySaver
+
+    var id: String { rawValue }
+
+    var interval: Duration {
+        switch self {
+        case .standard:     return .seconds(2)
+        case .relaxed:      return .seconds(5)
+        case .batterySaver: return .seconds(10)
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class ProcessMonitoringCoordinator {
@@ -19,6 +39,11 @@ final class ProcessMonitoringCoordinator {
     private static let codexDesktopCompletedGraceWindow: TimeInterval = 2 * 60
 
     var isResolvingInitialLiveSessions = false
+
+    /// Interval between process scans, driven by the user's cadence preference.
+    /// Read fresh each loop iteration so changes take effect on the next cycle.
+    @ObservationIgnored
+    var pollInterval: Duration = ProcessDiscoveryCadence.standard.interval
 
     @ObservationIgnored
     var syntheticClaudeSessionPrefix = ""
@@ -85,8 +110,30 @@ final class ProcessMonitoringCoordinator {
                 let resolver = self.terminalJumpTargetResolver
                 let liveSessions = self.state.sessions.filter(\.isTrackedLiveSession)
                 let runningTranscriptPaths = Self.transcriptPathsForRunningSessions(liveSessions)
-                let (snapshots, ghosttyAvail, terminalAvail, jumpTargets, transcriptIdleAt) = await Task.detached(priority: .utility) {
+                // The terminal snapshot probes spawn `osascript` subprocesses and
+                // send Apple Events to Terminal/Ghostty. `reconcileSessionAttachments`
+                // only consumes their results when there are tracked live sessions
+                // (everything past its empty-sessions early return), so when idle
+                // these spawns are pure waste fired every cycle. Skip them — and the
+                // jump-target resolution — until there's a live session to resolve.
+                // A session synthesized from process discovery this cycle simply
+                // gets its attachment resolved on the next one.
+                let hasLiveSessions = !liveSessions.isEmpty
+                let (snapshots, ghosttyAvail, terminalAvail, jumpTargets, transcriptIdleAt):
+                    (
+                        [ActiveProcessSnapshot],
+                        TerminalSessionAttachmentProbe.SnapshotAvailability<TerminalSessionAttachmentProbe.GhosttyTerminalSnapshot>?,
+                        TerminalSessionAttachmentProbe.SnapshotAvailability<TerminalSessionAttachmentProbe.TerminalTabSnapshot>?,
+                        [String: JumpTarget],
+                        [String: Date]
+                    ) = await Task.detached(priority: .utility) {
                     let s = discovery.discover()
+                    // Idle fast-path (#517): skip probes when nothing is live, but
+                    // still return an empty transcript-idle map so the demotion logic
+                    // (stale-running reconcile) keeps its 5-tuple contract.
+                    guard hasLiveSessions else {
+                        return (s, nil, nil, [:], [:])
+                    }
                     let g = probe.ghosttySnapshotAvailability()
                     let t = probe.terminalSnapshotAvailability()
                     let j = resolver.resolveJumpTargets(for: liveSessions, activeProcesses: s)
@@ -100,7 +147,7 @@ final class ProcessMonitoringCoordinator {
                     preResolvedJumpTargets: jumpTargets,
                     transcriptIdleAt: transcriptIdleAt
                 )
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: self.pollInterval)
             }
         }
     }
