@@ -121,15 +121,24 @@ public extension GeminiHookPayload {
         WorkspaceNameResolver.workspaceName(for: cwd)
     }
 
+    // 判断当前 payload 是否来源于 Antigravity 助手
+    private var isAntigravity: Bool {
+        source?.lowercased().contains("antigravity") == true
+    }
+
     var sessionTitle: String {
-        "Gemini CLI · \(workspaceName)"
+        if isAntigravity {
+            return "Antigravity · \(workspaceName)"
+        }
+        return "Gemini CLI · \(workspaceName)"
     }
 
     var defaultJumpTarget: JumpTarget {
-        JumpTarget(
+        let name = isAntigravity ? "Antigravity" : "Gemini"
+        return JumpTarget(
             terminalApp: terminalApp ?? "Terminal",
             workspaceName: workspaceName,
-            paneTitle: terminalTitle ?? "Gemini \(sessionID.prefix(8))",
+            paneTitle: terminalTitle ?? "\(name) \(sessionID.prefix(8))",
             workingDirectory: cwd,
             terminalSessionID: terminalSessionID,
             terminalTTY: terminalTTY
@@ -155,27 +164,28 @@ public extension GeminiHookPayload {
             return value
         }
 
-        // For transcripts, the newest content is at the end.
+        // 对于日志转储，最新内容通常在最后面
         return String(value.suffix(limit))
     }
 
     var implicitSummary: String {
+        let name = isAntigravity ? "Antigravity" : "Gemini CLI"
         switch hookEventName {
         case .sessionStart:
             switch source?.lowercased() {
             case "resume":
-                return "Resumed Gemini CLI session in \(workspaceName)."
+                return "Resumed \(name) session in \(workspaceName)."
             case "clear":
-                return "Cleared Gemini CLI session in \(workspaceName)."
+                return "Cleared \(name) session in \(workspaceName)."
             default:
-                return "Started Gemini CLI session in \(workspaceName)."
+                return "Started \(name) session in \(workspaceName)."
             }
         case .sessionEnd:
-            return "Gemini CLI session ended in \(workspaceName)."
+            return "\(name) session ended in \(workspaceName)."
         case .beforeAgent:
-            return promptPreview.map { "Prompt: \($0)" } ?? "Gemini CLI started a new turn in \(workspaceName)."
+            return promptPreview.map { "Prompt: \($0)" } ?? "\(name) started a new turn in \(workspaceName)."
         case .afterAgent:
-            return promptResponsePreview ?? "Gemini CLI completed a turn in \(workspaceName)."
+            return promptResponsePreview ?? "\(name) completed a turn in \(workspaceName)."
         case .notification:
             return notificationSummary
         }
@@ -190,7 +200,8 @@ public extension GeminiHookPayload {
     }
 
     var notificationSummary: String {
-        clipped(message) ?? "Gemini CLI sent a notification."
+        let name = isAntigravity ? "Antigravity" : "Gemini CLI"
+        return clipped(message) ?? "\(name) sent a notification."
     }
 
     var renderedDetails: String? {

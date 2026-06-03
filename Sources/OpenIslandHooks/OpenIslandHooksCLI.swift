@@ -15,13 +15,15 @@ struct OpenIslandHooksCLI {
         case codebuddy
         case cursor
         case gemini
+        case antigravity
         case kimi
 
+        // 判断是否为 Claude 格式的数据 payload
         var isClaudeFormat: Bool {
             switch self {
             case .claude, .qoder, .qwen, .factory, .droid, .codebuddy, .kimi:
                 return true
-            case .codex, .cursor, .gemini:
+            case .codex, .cursor, .gemini, .antigravity:
                 return false
             }
         }
@@ -95,10 +97,16 @@ struct OpenIslandHooksCLI {
                     FileHandle.standardOutput.write(output)
                     FileHandle.standardOutput.write(Data("\n".utf8))
                 }
-            case .gemini:
-                let payload = try decoder
+            case .gemini, .antigravity:
+                // 解析 Gemini/Antigravity Hook 的 payload 数据
+                var payload = try decoder
                     .decode(GeminiHookPayload.self, from: input)
                     .withRuntimeContext(environment: ProcessInfo.processInfo.environment)
+
+                // 如果没有指定 source 来源，则使用命令行入参传入的 source 参数值
+                if payload.source == nil {
+                    payload.source = sourceString
+                }
 
                 _ = try? client.send(.processGeminiHook(payload), timeout: 45)
             }

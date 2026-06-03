@@ -696,11 +696,21 @@ struct ActiveAgentProcessDiscovery {
             return false
         }
 
-        return firstToken == "gemini"
+        // 匹配原生的 Gemini CLI 进程
+        let isGemini = firstToken == "gemini"
             || firstToken.hasSuffix("/gemini")
             || lowered.contains("/bin/gemini")
             || lowered.contains("/google/gemini-cli")
             || lowered.contains("/@google/gemini-cli")
+
+        // 匹配 Antigravity (Gemini) 助手进程
+        let isAntigravity = firstToken == "antigravity"
+            || firstToken.hasSuffix("/antigravity")
+            || lowered.contains("/bin/antigravity")
+            || lowered.contains("/antigravity-cli")
+            || lowered.contains("/@google/antigravity")
+
+        return isGemini || isAntigravity
     }
 
     /// Matches the `kimi` CLI (Moonshot) entry-point. `kimi-info` / `kimi-mcp` /

@@ -160,8 +160,9 @@ public enum GeminiHookInstaller {
 
     private static func isOpenIslandGeminiHookCommand(_ command: String) -> Bool {
         let normalized = command.lowercased()
+        // 判断命令是否属于 Open Island 托管的 Gemini/Antigravity Hook 命令行工具
         return (normalized.contains("openislandhooks") || normalized.contains("vibeislandhooks"))
-            && normalized.contains("gemini")
+            && (normalized.contains("gemini") || normalized.contains("antigravity"))
     }
 
     private static func shellQuote(_ string: String) -> String {

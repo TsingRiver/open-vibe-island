@@ -310,6 +310,50 @@ struct GeminiHooksTests {
         #expect(completion?.contains("Updated the API query parameter guide with typed examples:\n- Added the recommended annotated syntax .") == false)
         #expect(completion?.components(separatedBy: "- Updated the snippets for Python 3.10+.").count == 2)
     }
+
+    @Test
+    func geminiHooksIdentifyAntigravity() throws {
+        // 验证 source 包含 antigravity 时能被正确识别，且显示自定义标题
+        let payload = GeminiHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            sessionID: "antigravity-session-1",
+            source: "antigravity"
+        )
+
+        let sessionTitle = payload.sessionTitle
+        #expect(sessionTitle == "Antigravity · worktree")
+    }
+
+    @Test
+    func geminiAntigravityImplicitSummaries() throws {
+        // 验证 Antigravity 环境下 implicitSummary 的定制输出
+        let payload = GeminiHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            sessionID: "antigravity-session-2",
+            source: "antigravity"
+        )
+        #expect(payload.implicitSummary == "Started Antigravity session in worktree.")
+
+        let beforePayload = GeminiHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .beforeAgent,
+            sessionID: "antigravity-session-2",
+            prompt: "Help me code.",
+            source: "antigravity"
+        )
+        #expect(beforePayload.implicitSummary == "Prompt: Help me code.")
+
+        let afterPayload = GeminiHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .afterAgent,
+            sessionID: "antigravity-session-2",
+            promptResponse: "Sure, here is the code.",
+            source: "antigravity"
+        )
+        #expect(afterPayload.implicitSummary == "Sure, here is the code.")
+    }
 }
 
 private func nextMatchingGeminiEvent(
