@@ -319,7 +319,14 @@ struct IslandPanelView: View {
             .clipShape(surfaceShape)
             .overlay {
                 surfaceShape
-                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.12), Color.white.opacity(0.03), Color.white.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             }
         }
         .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
@@ -379,23 +386,28 @@ struct IslandPanelView: View {
         HStack(spacing: Self.headerControlSpacing) {
             headerIconButton(
                 systemName: model.isSoundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                tint: model.isSoundMuted ? .orange.opacity(0.92) : .white.opacity(0.62)
+                tint: model.isSoundMuted ? .orange.opacity(0.92) : .white.opacity(0.72)
             ) {
                 model.toggleSoundMuted()
             }
 
-            headerIconButton(systemName: "gearshape.fill", tint: .white.opacity(0.62)) {
+            headerIconButton(systemName: "gearshape.fill", tint: .white.opacity(0.72)) {
                 model.showSettings()
             }
 
             headerIconButton(
                 systemName: "power",
-                tint: .white.opacity(0.62),
+                tint: Color(red: 1.0, green: 0.35, blue: 0.35).opacity(0.85),
                 accessibilityLabel: model.lang.t("island.quit.confirmTitle")
             ) {
                 showingQuitConfirmation = true
             }
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(Color.white.opacity(0.045))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.06), lineWidth: 0.8))
     }
 
     private func headerIconButton(
@@ -772,17 +784,31 @@ struct IslandPanelView: View {
     }
 
     private func sessionOverviewMetric(_ item: SessionOverviewItem, compact: Bool) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             if let tint = item.tint {
                 Circle()
                     .fill(tint)
-                    .frame(width: 5.5, height: 5.5)
+                    .frame(width: 5, height: 5)
+                    .shadow(color: tint.opacity(0.5), radius: 2)
             }
 
             Text(sessionOverviewMetricTitle(item, compact: compact))
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(item.tint == nil ? V6Palette.paper.opacity(0.34) : V6Palette.paper.opacity(0.48))
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(item.tint == nil ? V6Palette.paper.opacity(0.48) : V6Palette.paper.opacity(0.85))
         }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            Capsule().fill(
+                item.tint != nil ? item.tint!.opacity(0.09) : Color.white.opacity(0.04)
+            )
+        )
+        .overlay(
+            Capsule().stroke(
+                item.tint != nil ? item.tint!.opacity(0.18) : Color.white.opacity(0.06),
+                lineWidth: 0.8
+            )
+        )
     }
 
     private func sessionOverviewMetricTitle(_ item: SessionOverviewItem, compact: Bool) -> String {
@@ -1204,6 +1230,7 @@ private struct IslandSessionRow: View {
         rowBody(referenceDate: referenceDate)
     }
 
+    @ViewBuilder
     private func rowBody(referenceDate: Date) -> some View {
         let rawPresence = session.islandPresence(at: referenceDate)
         let isStaleCompleted = session.isStaleCompletedForIsland(
@@ -1215,7 +1242,10 @@ private struct IslandSessionRow: View {
         let presence = isStaleCompleted
             ? .inactive
             : ((showsDetail && rawPresence == .inactive) ? .active : rawPresence)
-        return VStack(alignment: .leading, spacing: 0) {
+        
+        let hasNotification = presentation == .notification
+        
+        let content = VStack(alignment: .leading, spacing: 0) {
             rowSummary(presence: presence, showsDetail: showsDetail)
 
             if showsDetail {
@@ -1224,24 +1254,18 @@ private struct IslandSessionRow: View {
                 if shouldShowEmbeddedDetailBody {
                     embeddedDetailBody
                         .padding(.leading, detailLeadingInset)
-                        .padding(.trailing, sideInset)
+                        .padding(.trailing, hasNotification ? sideInset : 14)
                         .padding(.bottom, 13)
                 }
             }
-        }
-        .background(rowFillColor(for: presence))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(.white.opacity(0.045))
-                .frame(height: 1)
         }
         .overlay(alignment: .leading) {
             if showsLeadingStatusBar {
                 RoundedRectangle(cornerRadius: 999, style: .continuous)
                     .fill(statusTint(for: presence))
                     .frame(width: 3)
-                    .padding(.vertical, showsDetail ? 10 : 8)
-                    .padding(.leading, 14)
+                    .padding(.vertical, showsDetail ? 12 : 10)
+                    .padding(.leading, hasNotification ? 14 : 10)
             }
         }
         .opacity(isStaleCompleted ? 0.7 : 1)
@@ -1257,6 +1281,38 @@ private struct IslandSessionRow: View {
             if !interactive {
                 detailOverride = nil
             }
+        }
+
+        if hasNotification {
+            content
+                .background(rowFillColor(for: presence))
+        } else {
+            content
+                .padding(.vertical, 2)
+                .background(
+                    ZStack {
+                        IslandDesignPalette.Card.background
+                        IslandDesignPalette.Card.ambientBg(for: presence)
+                    }
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(isHighlighted ? 0.16 : 0.07),
+                                    Color.white.opacity(isHighlighted ? 0.08 : 0.03)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(isHighlighted ? 0.35 : 0.18), radius: isHighlighted ? 6 : 3, y: 1.5)
+                .padding(.horizontal, sideInset)
+                .padding(.vertical, 4.5)
         }
     }
 
@@ -1305,13 +1361,16 @@ private struct IslandSessionRow: View {
             }
         }
         .padding(.leading, rowLeadingInset)
-        .padding(.trailing, sideInset)
+        .padding(.trailing, presentation == .notification ? sideInset : 14)
         .padding(.top, 11)
         .padding(.bottom, showsDetail ? 8 : 11)
     }
 
     @ViewBuilder
     private func rowAuxiliaryDetails(presence: IslandSessionPresence) -> some View {
+        let hasNotification = presentation == .notification
+        let rightPadding: CGFloat = hasNotification ? sideInset : 14
+
         if !shouldShowEmbeddedDetailBody,
            let activityLine = session.spotlightActivityLineText ?? expandedActivityLineText {
             Text(activityLine)
@@ -1319,7 +1378,7 @@ private struct IslandSessionRow: View {
                 .foregroundStyle(activityColor(for: presence).opacity(0.94))
                 .lineLimit(2)
                 .padding(.leading, detailLeadingInset)
-                .padding(.trailing, sideInset)
+                .padding(.trailing, rightPadding)
                 .padding(.bottom, 10)
         }
 
@@ -1367,7 +1426,7 @@ private struct IslandSessionRow: View {
                 }
             }
             .padding(.leading, detailLeadingInset)
-            .padding(.trailing, sideInset)
+            .padding(.trailing, rightPadding)
             .padding(.bottom, 10)
         }
 
@@ -1391,7 +1450,7 @@ private struct IslandSessionRow: View {
                 }
             }
             .padding(.leading, detailLeadingInset)
-            .padding(.trailing, sideInset)
+            .padding(.trailing, rightPadding)
             .padding(.bottom, 10)
         }
     }
@@ -1480,11 +1539,11 @@ private struct IslandSessionRow: View {
 
         return switch stateIndicator {
         case .bar:
-            max(28, sideInset)
+            22
         case .tint:
-            sideInset
+            14
         case .animatedDot, .glyph:
-            sideInset
+            14
         }
     }
 
@@ -1495,11 +1554,11 @@ private struct IslandSessionRow: View {
 
         return switch stateIndicator {
         case .bar:
-            max(28, sideInset)
+            22
         case .tint:
-            sideInset
+            14
         case .animatedDot, .glyph:
-            sideInset + 30
+            44
         }
     }
 
@@ -1874,14 +1933,33 @@ private struct IslandSessionRow: View {
                 let pulse = presence == .running || isActionable
                     ? (sin(context.date.timeIntervalSinceReferenceDate * 3.2) + 1) / 2
                     : 0
-                Circle()
-                    .fill(tint)
-                    .frame(width: 9, height: 9)
-                    .scaleEffect(1 + (pulse * 0.18))
-                    .shadow(color: tint.opacity(presence == .inactive ? 0 : 0.36 + (pulse * 0.26)), radius: 4 + (pulse * 3))
-                    .padding(.top, 6)
+                ZStack {
+                    if presence == .running || isActionable {
+                        Circle()
+                            .stroke(tint.opacity(0.4 - (pulse * 0.25)), lineWidth: 1.5)
+                            .frame(width: 14 + (pulse * 8), height: 14 + (pulse * 8))
+                        
+                        Circle()
+                            .fill(tint.opacity(0.18 - (pulse * 0.12)))
+                            .frame(width: 14 + (pulse * 8), height: 14 + (pulse * 8))
+                    }
+                    
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [Color.white, tint, tint.opacity(0.8)],
+                                center: .center,
+                                startRadius: 0,
+                                endRadius: 4.5
+                            )
+                        )
+                        .frame(width: 9, height: 9)
+                        .scaleEffect(1 + (pulse * 0.15))
+                        .shadow(color: tint.opacity(presence == .inactive ? 0 : 0.45 + (pulse * 0.3)), radius: 3 + (pulse * 2.5))
+                }
+                .padding(.top, 6)
             }
-            .frame(width: 10, height: 24, alignment: .top)
+            .frame(width: 20, height: 24, alignment: .top)
         case .bar:
             RoundedRectangle(cornerRadius: 2.5, style: .continuous)
                 .fill(tint)
@@ -2541,36 +2619,72 @@ private struct IslandActionButtonStyle: ButtonStyle {
     let kind: Kind
     var expands = false
 
+    func makeBody(configuration: Configuration) -> some View {
+        IslandActionButton(configuration: configuration, kind: kind, expands: expands)
+    }
+}
+
+private struct IslandActionButton: View {
+    let configuration: ButtonStyleConfiguration
+    let kind: IslandActionButtonStyle.Kind
+    let expands: Bool
+    
+    @State private var isHovering = false
     @Environment(\.isEnabled) private var isEnabled
 
-    func makeBody(configuration: Configuration) -> some View {
+    var body: some View {
         configuration.label
-            .font(.system(size: 11.8, weight: .semibold))
+            .font(.system(size: 11.5, weight: .semibold))
             .foregroundStyle(foregroundColor)
             .lineLimit(1)
             .frame(maxWidth: expands ? .infinity : nil)
             .padding(.horizontal, 13)
             .padding(.vertical, 8)
-            .background(backgroundColor(configuration.isPressed), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(
+                Group {
+                    if !isEnabled {
+                        Color.white.opacity(0.055)
+                    } else {
+                        switch kind {
+                        case .primary:
+                            IslandDesignPalette.Gradients.completed
+                        case .warning:
+                            IslandDesignPalette.Gradients.waitingForAnswer
+                        case .secondary:
+                            LinearGradient(
+                                colors: [Color.white.opacity(isHovering ? 0.12 : 0.07), Color.white.opacity(isHovering ? 0.07 : 0.03)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        }
+                    }
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(strokeColor, lineWidth: 1)
             )
-            .opacity(configuration.isPressed ? 0.82 : 1)
+            .scaleEffect(configuration.isPressed ? 0.96 : (isHovering ? 1.02 : 1.0))
+            .shadow(color: Color.black.opacity(configuration.isPressed ? 0.1 : (isHovering ? 0.3 : 0.15)), radius: isHovering ? 4 : 2, y: 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: configuration.isPressed)
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: isHovering)
+            .onHover { hovering in
+                isHovering = hovering
+            }
     }
 
     private var foregroundColor: Color {
         guard isEnabled else {
             return V6Palette.paper.opacity(0.42)
         }
-
         switch kind {
         case .primary:
-            return .black.opacity(0.88)
+            return .white
         case .warning:
             return .white
         case .secondary:
-            return V6Palette.paper.opacity(0.78)
+            return V6Palette.paper.opacity(0.85)
         }
     }
 
@@ -2578,30 +2692,13 @@ private struct IslandActionButtonStyle: ButtonStyle {
         guard isEnabled else {
             return .white.opacity(0.07)
         }
-
         switch kind {
         case .primary:
-            return V6Palette.paper.opacity(0.86)
+            return Color.white.opacity(0.15)
         case .warning:
-            return Color(red: 0.85, green: 0.55, blue: 0.15).opacity(0.42)
+            return Color.white.opacity(0.15)
         case .secondary:
-            return .white.opacity(0.07)
-        }
-    }
-
-    private func backgroundColor(_ isPressed: Bool) -> Color {
-        guard isEnabled else {
-            return Color.white.opacity(0.055)
-        }
-
-        let pressedFactor: Double = isPressed ? 0.78 : 1
-        switch kind {
-        case .primary:
-            return V6Palette.paper.opacity(pressedFactor)
-        case .warning:
-            return Color(red: 0.85, green: 0.55, blue: 0.15).opacity(pressedFactor)
-        case .secondary:
-            return Color.white.opacity(isPressed ? 0.11 : 0.065)
+            return .white.opacity(0.08)
         }
     }
 }

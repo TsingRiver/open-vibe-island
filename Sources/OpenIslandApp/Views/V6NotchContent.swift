@@ -225,6 +225,8 @@ struct V6ClosedPill: View {
     /// Forwarded to the glyph: when false the idle pill stops breathing.
     var idleAnimated: Bool = true
 
+    @State private var isBreathing = false
+
     var body: some View {
         switch layout {
         case .external: externalBody
@@ -241,6 +243,21 @@ struct V6ClosedPill: View {
     // label) and the right-slot content so they never touch at small widths.
     private static let innerGap: CGFloat = 6
 
+    // MARK: - Ambient Underglow view helper
+    @ViewBuilder
+    private func ambientUnderglow(width: CGFloat) -> some View {
+        if mode != .idle {
+            let glowColor: Color = mode == .running ? IslandDesignPalette.Status.running : IslandDesignPalette.Status.waitingAggregate
+            V6ClosedPillShape()
+                .fill(glowColor.opacity(0.38))
+                .blur(radius: 6)
+                .offset(y: 2)
+                .scaleEffect(x: 0.95, y: 1.0)
+                .opacity(isBreathing ? 1.0 : 0.45)
+                .frame(width: width, height: height)
+        }
+    }
+
     // MARK: External (fluid)
 
     private var externalBody: some View {
@@ -254,8 +271,20 @@ struct V6ClosedPill: View {
         let width = max(minWidth, intrinsic)
 
         return ZStack {
+            ambientUnderglow(width: width)
+
             V6ClosedPillShape()
                 .fill(V6Palette.ink)
+
+            V6ClosedPillShape()
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.12), Color.white.opacity(0.04), Color.white.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
 
             HStack(spacing: 0) {
                 UnifiedBars(mode: mode, size: 24, idleAnimated: idleAnimated)
@@ -277,6 +306,12 @@ struct V6ClosedPill: View {
             .padding(.horizontal, pad)
         }
         .frame(width: width, height: height)
+        .onAppear {
+            startBreathingAnimation()
+        }
+        .onChange(of: mode) { _, _ in
+            startBreathingAnimation()
+        }
         .animation(
             .timingCurve(0.4, 0, 0.2, 1, duration: 0.45),
             value: AnyHashable([
@@ -294,8 +329,20 @@ struct V6ClosedPill: View {
         let outer = halfReserve + physicalNotchWidth + halfReserve
 
         return ZStack {
+            ambientUnderglow(width: outer)
+
             V6ClosedPillShape()
                 .fill(V6Palette.ink)
+
+            V6ClosedPillShape()
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.12), Color.white.opacity(0.04), Color.white.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
 
             HStack(spacing: 0) {
                 UnifiedBars(mode: mode, size: 24, idleAnimated: idleAnimated)
@@ -310,6 +357,20 @@ struct V6ClosedPill: View {
             .padding(.horizontal, pad)
         }
         .frame(width: outer, height: height)
+        .onAppear {
+            startBreathingAnimation()
+        }
+        .onChange(of: mode) { _, _ in
+            startBreathingAnimation()
+        }
+    }
+
+    private func startBreathingAnimation() {
+        // 如果是 idle 状态，无需激活呼吸辉光以节省资源
+        guard mode != .idle else { return }
+        withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+            isBreathing = true
+        }
     }
 }
 
