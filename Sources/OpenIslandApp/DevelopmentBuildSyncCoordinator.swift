@@ -77,7 +77,12 @@ final class DevelopmentBuildSyncCoordinator {
     var onStatusMessage: ((String) -> Void)?
 
     private var syncTask: Task<Void, Never>?
-    private var isSyncInProgress = false
+    private(set) var isSyncInProgress = false
+
+    /// 重置同步状态，允许用户再次触发检查更新
+    func resetSyncStatus() {
+        isSyncInProgress = false
+    }
 
     /// Starts a guarded repo refresh for the detected appcast version.
     /// - Parameter targetVersion: The newer appcast version Sparkle discovered.
@@ -91,10 +96,18 @@ final class DevelopmentBuildSyncCoordinator {
         }
 
         isSyncInProgress = true
-        onStatusMessage?("检测到 Open Island 新版本 \(targetVersion)。正在同步本地仓库并重新构建 Open Island Dev…")
+        onStatusMessage?("检测到新版本 \(targetVersion)。正在检查本地状态并准备合并代码…")
 
         syncTask = Task.detached(priority: .utility) {
-            let result = await Self.performSync(targetVersion: targetVersion, repoRoot: repoRoot)
+            let result = await Self.performSync(
+                targetVersion: targetVersion,
+                repoRoot: repoRoot,
+                progressUpdate: { message in
+                    Task { @MainActor in
+                        self.onStatusMessage?(message)
+                    }
+                }
+            )
             await MainActor.run {
                 // 如果没有触发重新构建，说明同步在中间阶段取消或失败了，重置为 false 允许用户重试。
                 // 如果已经触发重新构建，我们将 isSyncInProgress 保持为 true，防止在进程退役前重复点击触发更新。
@@ -110,12 +123,15 @@ final class DevelopmentBuildSyncCoordinator {
     /// - Parameters:
     ///   - targetVersion: The newer appcast version Sparkle discovered.
     ///   - repoRoot: The source checkout embedded into the dev bundle metadata.
+    ///   - progressUpdate: A closure to report build and merge progress back to the UI.
     /// - Returns: A tuple containing the status message and whether a rebuild was launched.
     private static func performSync(
         targetVersion: String,
-        repoRoot: URL
+        repoRoot: URL,
+        progressUpdate: @escaping @Sendable (String) -> Void
     ) async -> (message: String, didLaunchRebuild: Bool) {
         do {
+            progressUpdate("合并最新代码…")
             let statusResult = try runCommand(
                 executablePath: "/usr/bin/env",
                 arguments: ["git", "status", "--porcelain"],
@@ -184,8 +200,34 @@ final class DevelopmentBuildSyncCoordinator {
                 break
             }
 
+            progressUpdate("编译中（编译 OpenIslandApp，可能需要大约 10 秒）…")
+            let buildAppResult = try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: ["swift", "build", "-c", "debug", "--product", "OpenIslandApp"],
+                currentDirectoryURL: repoRoot
+            )
+            guard buildAppResult.exitCode == 0 else {
+                return ("开发版同步失败：编译 OpenIslandApp 错误 (退出码 \(buildAppResult.exitCode))。\n\(buildAppResult.stderr)", false)
+            }
+
+            progressUpdate("编译中（编译辅助组件 OpenIslandHooks / Setup）…")
+            let buildHooksResult = try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: ["swift", "build", "-c", "debug", "--product", "OpenIslandHooks"],
+                currentDirectoryURL: repoRoot
+            )
+            let buildSetupResult = try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: ["swift", "build", "-c", "debug", "--product", "OpenIslandSetup"],
+                currentDirectoryURL: repoRoot
+            )
+            guard buildHooksResult.exitCode == 0 && buildSetupResult.exitCode == 0 else {
+                return ("开发版同步失败：编译 OpenIslandHooks/Setup 错误。", false)
+            }
+
+            progressUpdate("安装中（正在部署并配置开发版 App 包）…")
             try launchRebuildScript(repoRoot: repoRoot)
-            return ("检测到 Open Island 新版本 \(targetVersion)。正在从最新的仓库代码重新构建 Open Island Dev…", true)
+            return ("更新成功！", true)
         } catch {
             return ("开发版同步失败：\(error.localizedDescription)", false)
         }
@@ -193,7 +235,7 @@ final class DevelopmentBuildSyncCoordinator {
 
     /// Reads the development checkout root embedded into the generated dev bundle.
     /// - Returns: The checkout URL when the app is running from `Open Island Dev.app`.
-    private static func developmentRepoRoot() -> URL? {
+    static func developmentRepoRoot() -> URL? {
         guard let path = Bundle.main.object(
             forInfoDictionaryKey: "OpenIslandDevelopmentRepoRoot"
         ) as? String,
@@ -243,9 +285,17 @@ final class DevelopmentBuildSyncCoordinator {
     private static func launchRebuildScript(repoRoot: URL) throws {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        task.arguments = ["scripts/launch-dev-app.sh", "--skip-setup"]
+        task.arguments = ["scripts/launch-dev-app.sh", "--skip-setup", "--no-restart", "--skip-build"]
         task.currentDirectoryURL = repoRoot
+
+        // 清除环境变量，防止伪装的版本号被继承到新包中
+        var env = ProcessInfo.processInfo.environment
+        env.removeValue(forKey: "OPEN_ISLAND_VERSION")
+        env.removeValue(forKey: "OPEN_ISLAND_BUILD_NUMBER")
+        task.environment = env
+
         try task.run()
+        task.waitUntilExit()
     }
 
     /// Formats a concise git-command failure message for the UI status bar.

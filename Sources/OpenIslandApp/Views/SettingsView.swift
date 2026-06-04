@@ -375,9 +375,20 @@ struct AboutSettingsPane: View {
                             model.updateChecker.checkForUpdates()
                         }
                     )
-                    .disabled(!model.updateChecker.canCheckForUpdates)
-                    .opacity(model.updateChecker.canCheckForUpdates ? 1 : 0.55)
+                    .disabled(!model.updateChecker.canCheckForUpdates || model.developmentBuildSync.isSyncInProgress)
+                    .opacity((model.updateChecker.canCheckForUpdates && !model.developmentBuildSync.isSyncInProgress) ? 1 : 0.55)
                     .accessibilityIdentifier("settings.about.checkForUpdates")
+
+                    if model.developmentBuildSync.isSyncInProgress {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(model.lastActionMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
 
                 Section {

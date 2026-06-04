@@ -672,10 +672,37 @@ final class AppModel {
         }
 
         developmentBuildSync.onStatusMessage = { [weak self] message in
-            self?.lastActionMessage = message
+            guard let self else { return }
+            self.lastActionMessage = message
 
-            // 如果同步失败或被跳过，弹窗告知具体原因
-            if message.contains("失败") || message.contains("已跳过") {
+            // 如果同步成功，弹窗提示用户是否重启应用
+            if message == "更新成功！" {
+                Task { @MainActor in
+                    let alert = NSAlert()
+                    alert.messageText = "更新成功"
+                    alert.informativeText = "新版本已成功合并并安装完毕。\n\n是否立即重启应用以应用更改？"
+                    alert.addButton(withTitle: "立即重启")
+                    alert.addButton(withTitle: "稍后重启")
+
+                    let response = alert.runModal()
+                    if response == .alertFirstButtonReturn {
+                        // 重启逻辑：拉起新的 Dev 软包并退出自己
+                        if DevelopmentBuildSyncCoordinator.developmentRepoRoot() != nil {
+                            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+                            let targetAppURL = homeDir.appendingPathComponent("Applications/Open Island Dev.app")
+
+                            let task = Process()
+                            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                            task.arguments = ["-na", targetAppURL.path]
+                            try? task.run()
+                        }
+                        NSApplication.shared.terminate(nil)
+                    } else {
+                        // 如果选择稍后重启，重置 isSyncInProgress 允许之后继续操作
+                        self.developmentBuildSync.resetSyncStatus()
+                    }
+                }
+            } else if message.contains("失败") || message.contains("已跳过") {
                 Task { @MainActor in
                     let alert = NSAlert()
                     alert.messageText = "更新未完成"

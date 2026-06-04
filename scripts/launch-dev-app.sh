@@ -4,9 +4,13 @@ set -euo pipefail
 
 
 skip_setup=false
+no_restart=false
+skip_build=false
 for arg in "$@"; do
   case "$arg" in
     --skip-setup) skip_setup=true ;;
+    --no-restart) no_restart=true ;;
+    --skip-build) skip_build=true ;;
   esac
 done
 
@@ -58,9 +62,11 @@ appcast_build_number="${appcast_metadata##* }"
 dev_short_version="${OPEN_ISLAND_VERSION:-$appcast_short_version}"
 dev_build_number="${OPEN_ISLAND_BUILD_NUMBER:-$appcast_build_number}"
 
-swift build -c debug --product OpenIslandApp
-swift build -c debug --product OpenIslandHooks
-swift build -c debug --product OpenIslandSetup
+if [ "$skip_build" = false ]; then
+  swift build -c debug --product OpenIslandApp
+  swift build -c debug --product OpenIslandHooks
+  swift build -c debug --product OpenIslandSetup
+fi
 
 build_root="$(swift build -c debug --show-bin-path)"
 app_binary="$build_root/OpenIslandApp"
@@ -74,13 +80,19 @@ fi
 
 mkdir -p "$bundle_dir/Contents/MacOS" "$bundle_dir/Contents/Helpers" "$bundle_dir/Contents/Resources" "$bundle_dir/Contents/Frameworks"
 
-# Kill any running instance before copying so the binary isn't locked.
-osascript -e 'tell application "Open Island Dev" to quit' 2>/dev/null || true
-pkill -9 -f "Open Island Dev" 2>/dev/null || true
-sleep 2
+if [ "$no_restart" = false ]; then
+  # Kill any running instance before copying so the binary isn't locked.
+  osascript -e 'tell application "Open Island Dev" to quit' 2>/dev/null || true
+  pkill -9 -f "Open Island Dev" 2>/dev/null || true
+  sleep 2
+fi
 
+# Use rm -f before copying to prevent Text file busy errors if the app is currently running.
+rm -f "$bundle_binary"
 command cp "$app_binary" "$bundle_binary"
+rm -f "$bundle_dir/Contents/Helpers/OpenIslandHooks"
 command cp "$hooks_binary" "$bundle_dir/Contents/Helpers/OpenIslandHooks"
+rm -f "$bundle_dir/Contents/Helpers/OpenIslandSetup"
 command cp "$setup_binary" "$bundle_dir/Contents/Helpers/OpenIslandSetup"
 command cp "$brand_icon" "$bundle_dir/Contents/Resources/OpenIsland.icns"
 chmod +x "$bundle_binary" "$bundle_dir/Contents/Helpers/OpenIslandHooks" "$bundle_dir/Contents/Helpers/OpenIslandSetup"
@@ -185,4 +197,6 @@ fi
 
 codesign --force --deep --sign "$sign_identity" "$bundle_dir" 2>/dev/null || true
 
-open -na "$bundle_dir"
+if [ "$no_restart" = false ]; then
+  open -na "$bundle_dir"
+fi
