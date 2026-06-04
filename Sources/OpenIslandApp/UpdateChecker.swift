@@ -87,12 +87,7 @@ final class UpdateChecker: NSObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] value in
                 self?.canCheckForUpdates = value
-            }
-
-        #if DEBUG
-        startDevelopmentPolling()
-        #endif
-    }
+            }    }
 
     /// Manually trigger an update check (from Settings UI).
     func checkForUpdates() {

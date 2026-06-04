@@ -156,8 +156,14 @@ struct SettingsView: View {
                 AboutSettingsPane(model: model)
             }
 
-            if model.updateChecker.hasUpdate, let version = model.updateChecker.latestVersion {
-                UpdateBanner(version: version, lang: lang) {
+            if model.isUpdateInstalledWaitingForRestart {
+                UpdateBanner(isWaitingForRestart: true, version: "", lang: lang) {
+                    model.restartApplicationForUpdate()
+                }
+                .padding(.top, 8)
+                .padding(.trailing, 16)
+            } else if model.updateChecker.hasUpdate, let version = model.updateChecker.latestVersion {
+                UpdateBanner(isWaitingForRestart: false, version: version, lang: lang) {
                     model.updateChecker.checkForUpdates()
                 }
                 .padding(.top, 8)
@@ -367,27 +373,39 @@ struct AboutSettingsPane: View {
 
             Form {
                 Section {
-                    aboutActionRow(
-                        title: lang.t("settings.about.checkForUpdates"),
-                        systemImage: "arrow.triangle.2.circlepath",
-                        tint: primaryInk,
-                        action: {
-                            model.updateChecker.checkForUpdates()
-                        }
-                    )
-                    .disabled(!model.updateChecker.canCheckForUpdates || model.developmentBuildSync.isSyncInProgress)
-                    .opacity((model.updateChecker.canCheckForUpdates && !model.developmentBuildSync.isSyncInProgress) ? 1 : 0.55)
-                    .accessibilityIdentifier("settings.about.checkForUpdates")
+                    if model.isUpdateInstalledWaitingForRestart {
+                        aboutActionRow(
+                            title: "重启应用更新",
+                            systemImage: "arrow.clockwise",
+                            tint: Color.orange,
+                            action: {
+                                model.restartApplicationForUpdate()
+                            }
+                        )
+                        .accessibilityIdentifier("settings.about.restartForUpdate")
+                    } else {
+                        aboutActionRow(
+                            title: lang.t("settings.about.checkForUpdates"),
+                            systemImage: "arrow.triangle.2.circlepath",
+                            tint: primaryInk,
+                            action: {
+                                model.updateChecker.checkForUpdates()
+                            }
+                        )
+                        .disabled(!model.updateChecker.canCheckForUpdates || model.developmentBuildSync.isSyncInProgress)
+                        .opacity((model.updateChecker.canCheckForUpdates && !model.developmentBuildSync.isSyncInProgress) ? 1 : 0.55)
+                        .accessibilityIdentifier("settings.about.checkForUpdates")
 
-                    if model.developmentBuildSync.isSyncInProgress {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text(model.lastActionMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                        if model.developmentBuildSync.isSyncInProgress {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(model.lastActionMessage)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
 
@@ -409,6 +427,10 @@ struct AboutSettingsPane: View {
         }
         .frame(maxWidth: .infinity)
         .navigationTitle(lang.t("settings.tab.about"))
+        .onAppear {
+            // 当用户打开设置窗口（并选中关于页面）时，自动触发检查更新，不进行后台静默轮询
+            model.updateChecker.checkForUpdates()
+        }
     }
 
     private func aboutActionRow(
@@ -1257,6 +1279,7 @@ struct RemoteConnectionSection: View {
 // MARK: - Update Banner
 
 struct UpdateBanner: View {
+    let isWaitingForRestart: Bool
     let version: String
     let lang: LanguageManager
     var onUpdate: () -> Void
@@ -1264,22 +1287,24 @@ struct UpdateBanner: View {
     var body: some View {
         Button(action: onUpdate) {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.up.circle.fill")
+                Image(systemName: isWaitingForRestart ? "arrow.clockwise.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
-                Text(lang.t("settings.update.available", version))
+                Text(isWaitingForRestart ? "重启应用更新" : lang.t("settings.update.available", version))
                     .font(.system(size: 12, weight: .medium))
-                Image(systemName: "arrow.down.to.line")
-                    .font(.system(size: 10, weight: .bold))
+                if !isWaitingForRestart {
+                    Image(systemName: "arrow.down.to.line")
+                        .font(.system(size: 10, weight: .bold))
+                }
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(Color.blue)
+                    .fill(isWaitingForRestart ? Color.orange : Color.blue)
             )
         }
         .buttonStyle(.plain)
-        .shadow(color: .blue.opacity(0.3), radius: 4, y: 2)
+        .shadow(color: (isWaitingForRestart ? Color.orange : Color.blue).opacity(0.3), radius: 4, y: 2)
     }
 }

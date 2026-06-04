@@ -209,6 +209,9 @@ final class AppModel {
         }
     }
     var isBridgeReady = false
+
+    /// 标记是否已静默更新成功，等待用户重启以应用更新
+    var isUpdateInstalledWaitingForRestart = false
     var lastActionMessage = "Waiting for agent hook events..." {
         didSet {
             guard lastActionMessage != oldValue else {
@@ -675,30 +678,21 @@ final class AppModel {
             guard let self else { return }
             self.lastActionMessage = message
 
-            // 如果同步成功，弹窗提示用户是否重启应用
+            // 如果同步成功，弹窗提示用户是否重启应用，并置 isUpdateInstalledWaitingForRestart 为 true
             if message == "更新成功！" {
+                self.isUpdateInstalledWaitingForRestart = true
                 Task { @MainActor in
                     let alert = NSAlert()
                     alert.messageText = "更新成功"
-                    alert.informativeText = "新版本已成功合并并安装完毕。\n\n是否立即重启应用以应用更改？"
+                    alert.informativeText = "已更新到最新版，是否重启？"
                     alert.addButton(withTitle: "立即重启")
                     alert.addButton(withTitle: "稍后重启")
 
                     let response = alert.runModal()
                     if response == .alertFirstButtonReturn {
-                        // 重启逻辑：拉起新的 Dev 软包并退出自己
-                        if DevelopmentBuildSyncCoordinator.developmentRepoRoot() != nil {
-                            let homeDir = FileManager.default.homeDirectoryForCurrentUser
-                            let targetAppURL = homeDir.appendingPathComponent("Applications/Open Island Dev.app")
-
-                            let task = Process()
-                            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-                            task.arguments = ["-na", targetAppURL.path]
-                            try? task.run()
-                        }
-                        NSApplication.shared.terminate(nil)
+                        self.restartApplicationForUpdate()
                     } else {
-                        // 如果选择稍后重启，重置 isSyncInProgress 允许之后继续操作
+                        // 释放状态，允许后续再次点击，但 isUpdateInstalledWaitingForRestart 依旧为 true
                         self.developmentBuildSync.resetSyncStatus()
                     }
                 }
@@ -719,16 +713,8 @@ final class AppModel {
         }
 
         updateChecker.onDevelopmentUpdateDetected = { [weak self] version in
-            guard let self else { return }
-
-            // 弹窗提示用户正在同步代码、后台编译并准备重启
-            let alert = NSAlert()
-            alert.messageText = "检测到新版本"
-            alert.informativeText = "已检测到云端有最新版本 \(version)。\n\n应用将自动合并云端最新代码，并在后台重新编译、打包及重启。\n\n此过程大约需要 15 秒，期间请勿重复点击更新。点击“确定”开始更新。"
-            alert.addButton(withTitle: "确定")
-            alert.runModal()
-
-            self.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
+            // 自动静默更新：无需确认直接合并编译部署
+            self?.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
         }
 
         updateChecker.onDevelopmentNoUpdateDetected = { [weak self] in
@@ -1944,6 +1930,20 @@ final class AppModel {
     }
 
     func quitApplication() {
+        NSApplication.shared.terminate(nil)
+    }
+
+    /// 拉起最新的开发版应用，并退出当前的应用进程，实现静默更新后的重启
+    func restartApplicationForUpdate() {
+        if DevelopmentBuildSyncCoordinator.developmentRepoRoot() != nil {
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            let targetAppURL = homeDir.appendingPathComponent("Applications/Open Island Dev.app")
+
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            task.arguments = ["-na", targetAppURL.path]
+            try? task.run()
+        }
         NSApplication.shared.terminate(nil)
     }
 
