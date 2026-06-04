@@ -429,7 +429,7 @@ struct AboutSettingsPane: View {
         .navigationTitle(lang.t("settings.tab.about"))
         .onAppear {
             // 当用户打开设置窗口（并选中关于页面）时，自动触发检查更新，不进行后台静默轮询
-            model.updateChecker.checkForUpdates()
+            model.updateChecker.checkForUpdates(isUserInitiated: false)
         }
     }
 

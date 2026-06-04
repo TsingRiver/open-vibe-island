@@ -16,17 +16,32 @@ final class UpdateChecker: NSObject {
     private(set) var hasUpdate = false
     private(set) var latestVersion: String?
 
+    /// 跟踪上一次自动检查更新的时间，确保一天最多自动触发一次
+    @ObservationIgnored
+    private var lastAutoCheckDate: Date? {
+        get {
+            UserDefaults.standard.object(forKey: "OpenIslandLastAutoCheckUpdateDate") as? Date
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "OpenIslandLastAutoCheckUpdateDate")
+        }
+    }
+
+    /// 标记当前正在执行的检查更新是否为用户手动点击触发
+    @ObservationIgnored
+    private var isCurrentlyCheckingUserInitiated = false
+
     /// Fires only for the locally generated dev bundle when a newer appcast item is found.
     @ObservationIgnored
-    var onDevelopmentUpdateDetected: ((String) -> Void)?
+    var onDevelopmentUpdateDetected: ((String, Bool) -> Void)?
 
     /// Fires only for the locally generated dev bundle when checking for updates is manually triggered.
     @ObservationIgnored
-    var onCheckingForUpdates: (() -> Void)?
+    var onCheckingForUpdates: ((Bool) -> Void)?
 
     /// Fires only for the locally generated dev bundle when no newer appcast item is found.
     @ObservationIgnored
-    var onDevelopmentNoUpdateDetected: (() -> Void)?
+    var onDevelopmentNoUpdateDetected: ((Bool) -> Void)?
 
     @ObservationIgnored
     private var updaterController: SPUStandardUpdaterController!
@@ -89,14 +104,25 @@ final class UpdateChecker: NSObject {
                 self?.canCheckForUpdates = value
             }    }
 
-    /// Manually trigger an update check (from Settings UI).
-    func checkForUpdates() {
+    /// Manually or automatically trigger an update check (from Settings UI).
+    /// - Parameter isUserInitiated: `true` when triggered via manual button click, `false` for automatic load checks.
+    func checkForUpdates(isUserInitiated: Bool = true) {
         #if DEBUG
         guard isDevelopmentBundle else {
             return
         }
+
+        if !isUserInitiated {
+            // 如果是自动检查更新，一天最多自动触发一次，超出 24 小时才继续
+            if let lastCheck = lastAutoCheckDate, Date().timeIntervalSince(lastCheck) < 24 * 60 * 60 {
+                return
+            }
+            lastAutoCheckDate = Date()
+        }
+
+        isCurrentlyCheckingUserInitiated = isUserInitiated
         // 触发开始检查的回调以在界面上显示“正在检查更新…”
-        onCheckingForUpdates?()
+        onCheckingForUpdates?(isUserInitiated)
         updaterController.updater.checkForUpdateInformation()
         #else
         updaterController.checkForUpdates(nil)
@@ -163,7 +189,9 @@ extension UpdateChecker: SPUUpdaterDelegate {
             self.latestVersion = version
             #if DEBUG
             if self.isDevelopmentBundle {
-                self.onDevelopmentUpdateDetected?(version)
+                let isUser = self.isCurrentlyCheckingUserInitiated
+                self.isCurrentlyCheckingUserInitiated = false
+                self.onDevelopmentUpdateDetected?(version, isUser)
             }
             #endif
         }
@@ -175,8 +203,10 @@ extension UpdateChecker: SPUUpdaterDelegate {
             self.latestVersion = nil
             #if DEBUG
             if self.isDevelopmentBundle {
+                let isUser = self.isCurrentlyCheckingUserInitiated
+                self.isCurrentlyCheckingUserInitiated = false
                 // 触发无更新的回调以在界面上显示“已是最新版本”
-                self.onDevelopmentNoUpdateDetected?()
+                self.onDevelopmentNoUpdateDetected?(isUser)
             }
             #endif
         }

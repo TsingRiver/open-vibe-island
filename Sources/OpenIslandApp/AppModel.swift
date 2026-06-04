@@ -212,6 +212,9 @@ final class AppModel {
 
     /// 标记是否已静默更新成功，等待用户重启以应用更新
     var isUpdateInstalledWaitingForRestart = false
+
+    /// 跟踪上一次触发同步更新时是否为用户手动点击触发
+    private var isLastUpdateSyncUserInitiated = false
     var lastActionMessage = "Waiting for agent hook events..." {
         didSet {
             guard lastActionMessage != oldValue else {
@@ -681,20 +684,30 @@ final class AppModel {
             // 如果同步成功，弹窗提示用户是否重启应用，并置 isUpdateInstalledWaitingForRestart 为 true
             if message == "更新成功！" {
                 self.isUpdateInstalledWaitingForRestart = true
-                Task { @MainActor in
-                    let alert = NSAlert()
-                    alert.messageText = "更新成功"
-                    alert.informativeText = "已更新到最新版，是否重启？"
-                    alert.addButton(withTitle: "立即重启")
-                    alert.addButton(withTitle: "稍后重启")
 
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        self.restartApplicationForUpdate()
-                    } else {
-                        // 释放状态，允许后续再次点击，但 isUpdateInstalledWaitingForRestart 依旧为 true
-                        self.developmentBuildSync.resetSyncStatus()
+                let isUser = self.isLastUpdateSyncUserInitiated
+                self.isLastUpdateSyncUserInitiated = false
+
+                // 只有当用户手动触发检查更新时，才弹出重启询问 Alert 弹窗
+                if isUser {
+                    Task { @MainActor in
+                        let alert = NSAlert()
+                        alert.messageText = "更新成功"
+                        alert.informativeText = "已更新到最新版，是否重启？"
+                        alert.addButton(withTitle: "立即重启")
+                        alert.addButton(withTitle: "稍后重启")
+
+                        let response = alert.runModal()
+                        if response == .alertFirstButtonReturn {
+                            self.restartApplicationForUpdate()
+                        } else {
+                            // 释放状态，允许后续再次点击，但 isUpdateInstalledWaitingForRestart 依旧为 true
+                            self.developmentBuildSync.resetSyncStatus()
+                        }
                     }
+                } else {
+                    // 如果是自动检测并静默更新成功的，直接静默释放同步状态锁
+                    self.developmentBuildSync.resetSyncStatus()
                 }
             } else if message.contains("失败") || message.contains("已跳过") {
                 Task { @MainActor in
@@ -707,26 +720,32 @@ final class AppModel {
             }
         }
 
-        updateChecker.onCheckingForUpdates = { [weak self] in
+        updateChecker.onCheckingForUpdates = { [weak self] isUserInitiated in
             // 当手动触发更新检查时，在状态栏提示用户正在检查
-            self?.lastActionMessage = "正在检查云端更新…"
+            if isUserInitiated {
+                self?.lastActionMessage = "正在检查云端更新…"
+            }
         }
 
-        updateChecker.onDevelopmentUpdateDetected = { [weak self] version in
+        updateChecker.onDevelopmentUpdateDetected = { [weak self] version, isUserInitiated in
+            guard let self else { return }
+            self.isLastUpdateSyncUserInitiated = isUserInitiated
             // 自动静默更新：无需确认直接合并编译部署
-            self?.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
+            self.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
         }
 
-        updateChecker.onDevelopmentNoUpdateDetected = { [weak self] in
-            // 当探测完成且无更新时，在状态栏提示用户当前已是最新
-            self?.lastActionMessage = "检查更新完成：当前已是最新版本。"
+        updateChecker.onDevelopmentNoUpdateDetected = { [weak self] isUserInitiated in
+            // 当探测完成且无更新时，如果是用户手动触发的，则在状态栏和弹窗给出提示
+            if isUserInitiated {
+                self?.lastActionMessage = "检查更新完成：当前已是最新版本。"
 
-            // 弹窗提示用户已经是最新版本
-            let alert = NSAlert()
-            alert.messageText = "检查更新"
-            alert.informativeText = "当前已是最新版本。"
-            alert.addButton(withTitle: "确定")
-            alert.runModal()
+                // 弹窗提示用户已经是最新版本
+                let alert = NSAlert()
+                alert.messageText = "检查更新"
+                alert.informativeText = "当前已是最新版本。"
+                alert.addButton(withTitle: "确定")
+                alert.runModal()
+            }
         }
 
         discovery.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix
