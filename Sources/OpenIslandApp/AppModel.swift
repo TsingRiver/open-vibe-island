@@ -677,7 +677,7 @@ final class AppModel {
 
         updateChecker.onCheckingForUpdates = { [weak self] in
             // 当手动触发更新检查时，在状态栏提示用户正在检查
-            self?.lastActionMessage = "Checking for cloud updates…"
+            self?.lastActionMessage = "正在检查云端更新…"
         }
 
         updateChecker.onDevelopmentUpdateDetected = { [weak self] version in
@@ -686,7 +686,14 @@ final class AppModel {
 
         updateChecker.onDevelopmentNoUpdateDetected = { [weak self] in
             // 当探测完成且无更新时，在状态栏提示用户当前已是最新
-            self?.lastActionMessage = "Check complete: you are already up to date."
+            self?.lastActionMessage = "检查更新完成：当前已是最新版本。"
+
+            // 弹窗提示用户已经是最新版本
+            let alert = NSAlert()
+            alert.messageText = "检查更新"
+            alert.informativeText = "当前已是最新版本。"
+            alert.addButton(withTitle: "确定")
+            alert.runModal()
         }
 
         discovery.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix

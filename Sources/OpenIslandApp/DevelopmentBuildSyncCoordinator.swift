@@ -91,7 +91,7 @@ final class DevelopmentBuildSyncCoordinator {
         }
 
         isSyncInProgress = true
-        onStatusMessage?("Detected Open Island \(targetVersion). Syncing local repo and rebuilding Open Island Dev…")
+        onStatusMessage?("检测到 Open Island 新版本 \(targetVersion)。正在同步本地仓库并重新构建 Open Island Dev…")
 
         syncTask = Task.detached(priority: .utility) {
             let message = await Self.performSync(targetVersion: targetVersion, repoRoot: repoRoot)
@@ -116,7 +116,7 @@ final class DevelopmentBuildSyncCoordinator {
             )
             guard statusResult.exitCode == 0 else {
                 return commandFailureMessage(
-                    action: "checking git status",
+                    action: "检查 Git 状态",
                     result: statusResult
                 )
             }
@@ -128,7 +128,7 @@ final class DevelopmentBuildSyncCoordinator {
             )
             guard fetchResult.exitCode == 0 else {
                 return commandFailureMessage(
-                    action: "fetching origin/main",
+                    action: "拉取 origin/main",
                     result: fetchResult
                 )
             }
@@ -140,13 +140,13 @@ final class DevelopmentBuildSyncCoordinator {
             )
             guard aheadBehindResult.exitCode == 0 else {
                 return commandFailureMessage(
-                    action: "reading ahead/behind counts",
+                    action: "读取 Ahead/Behind 提交计数",
                     result: aheadBehindResult
                 )
             }
 
             guard let counts = DevelopmentBuildSyncPlan.parseAheadBehindCounts(aheadBehindResult.stdout) else {
-                return "Dev sync skipped: could not parse git ahead/behind counts."
+                return "开发版同步已跳过：无法解析 Git 的 Ahead/Behind 提交计数。"
             }
 
             let action = DevelopmentBuildSyncPlan.action(
@@ -171,16 +171,16 @@ final class DevelopmentBuildSyncCoordinator {
                         arguments: ["git", "merge", "--abort"],
                         currentDirectoryURL: repoRoot
                     )
-                    return "Dev sync skipped: merge conflict detected while merging origin/main. Automatically aborted merge."
+                    return "开发版同步已跳过：合并 origin/main 时检测到冲突。已自动放弃合并以还原工作区。"
                 }
             case .rebuildOnly:
                 break
             }
 
             try launchRebuildScript(repoRoot: repoRoot)
-            return "Detected Open Island \(targetVersion). Rebuilding Open Island Dev from the latest repo code…"
+            return "检测到 Open Island 新版本 \(targetVersion)。正在从最新的仓库代码重新构建 Open Island Dev…"
         } catch {
-            return "Dev sync failed: \(error.localizedDescription)"
+            return "开发版同步失败：\(error.localizedDescription)"
         }
     }
 
@@ -255,9 +255,9 @@ final class DevelopmentBuildSyncCoordinator {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         if detail.isEmpty {
-            return "Dev sync failed while \(action) (exit \(result.exitCode))."
+            return "开发版同步失败，在执行“\(action)”时发生错误 (退出码 \(result.exitCode))。"
         }
 
-        return "Dev sync failed while \(action): \(detail)"
+        return "开发版同步失败，在执行“\(action)”时发生错误：\(detail)"
     }
 }
