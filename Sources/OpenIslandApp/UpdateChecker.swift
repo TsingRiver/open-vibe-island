@@ -20,6 +20,14 @@ final class UpdateChecker: NSObject {
     @ObservationIgnored
     var onDevelopmentUpdateDetected: ((String) -> Void)?
 
+    /// Fires only for the locally generated dev bundle when checking for updates is manually triggered.
+    @ObservationIgnored
+    var onCheckingForUpdates: (() -> Void)?
+
+    /// Fires only for the locally generated dev bundle when no newer appcast item is found.
+    @ObservationIgnored
+    var onDevelopmentNoUpdateDetected: (() -> Void)?
+
     @ObservationIgnored
     private var updaterController: SPUStandardUpdaterController!
 
@@ -92,6 +100,8 @@ final class UpdateChecker: NSObject {
         guard isDevelopmentBundle else {
             return
         }
+        // 触发开始检查的回调以在界面上显示“正在检查更新…”
+        onCheckingForUpdates?()
         updaterController.updater.checkForUpdateInformation()
         #else
         updaterController.checkForUpdates(nil)
@@ -168,6 +178,12 @@ extension UpdateChecker: SPUUpdaterDelegate {
         Task { @MainActor in
             self.hasUpdate = false
             self.latestVersion = nil
+            #if DEBUG
+            if self.isDevelopmentBundle {
+                // 触发无更新的回调以在界面上显示“已是最新版本”
+                self.onDevelopmentNoUpdateDetected?()
+            }
+            #endif
         }
     }
 }

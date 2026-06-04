@@ -675,8 +675,18 @@ final class AppModel {
             self?.lastActionMessage = message
         }
 
+        updateChecker.onCheckingForUpdates = { [weak self] in
+            // 当手动触发更新检查时，在状态栏提示用户正在检查
+            self?.lastActionMessage = "Checking for cloud updates…"
+        }
+
         updateChecker.onDevelopmentUpdateDetected = { [weak self] version in
             self?.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
+        }
+
+        updateChecker.onDevelopmentNoUpdateDetected = { [weak self] in
+            // 当探测完成且无更新时，在状态栏提示用户当前已是最新
+            self?.lastActionMessage = "Check complete: you are already up to date."
         }
 
         discovery.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix

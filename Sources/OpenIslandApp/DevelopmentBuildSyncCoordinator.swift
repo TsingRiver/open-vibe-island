@@ -4,7 +4,7 @@ import Foundation
 struct DevelopmentBuildSyncPlan: Equatable {
     enum Action: Equatable {
         case rebuildOnly
-        case fastForwardAndRebuild
+        case mergeAndRebuild
         case blocked(String)
     }
 
@@ -62,12 +62,8 @@ struct DevelopmentBuildSyncPlan: Equatable {
             return .blocked("Dev sync skipped: the repository has local changes.")
         }
 
-        if aheadCount > 0 && behindCount > 0 {
-            return .blocked("Dev sync skipped: the current branch diverged from origin/main.")
-        }
-
         if behindCount > 0 {
-            return .fastForwardAndRebuild
+            return .mergeAndRebuild
         }
 
         return .rebuildOnly
@@ -162,17 +158,20 @@ final class DevelopmentBuildSyncCoordinator {
             switch action {
             case .blocked(let reason):
                 return reason
-            case .fastForwardAndRebuild:
+            case .mergeAndRebuild:
                 let mergeResult = try runCommand(
                     executablePath: "/usr/bin/env",
-                    arguments: ["git", "merge", "--ff-only", "origin/main"],
+                    arguments: ["git", "merge", "origin/main", "--no-edit"],
                     currentDirectoryURL: repoRoot
                 )
-                guard mergeResult.exitCode == 0 else {
-                    return commandFailureMessage(
-                        action: "fast-forwarding origin/main",
-                        result: mergeResult
+                if mergeResult.exitCode != 0 {
+                    // 合并发生冲突，自动执行 --abort 还原工作区，防止仓库处于合并中的紊乱状态
+                    _ = try? runCommand(
+                        executablePath: "/usr/bin/env",
+                        arguments: ["git", "merge", "--abort"],
+                        currentDirectoryURL: repoRoot
                     )
+                    return "Dev sync skipped: merge conflict detected while merging origin/main. Automatically aborted merge."
                 }
             case .rebuildOnly:
                 break
