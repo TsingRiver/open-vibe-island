@@ -673,6 +673,17 @@ final class AppModel {
 
         developmentBuildSync.onStatusMessage = { [weak self] message in
             self?.lastActionMessage = message
+
+            // 如果同步失败或被跳过，弹窗告知具体原因
+            if message.contains("失败") || message.contains("已跳过") {
+                Task { @MainActor in
+                    let alert = NSAlert()
+                    alert.messageText = "更新未完成"
+                    alert.informativeText = message
+                    alert.addButton(withTitle: "确定")
+                    alert.runModal()
+                }
+            }
         }
 
         updateChecker.onCheckingForUpdates = { [weak self] in
@@ -681,7 +692,16 @@ final class AppModel {
         }
 
         updateChecker.onDevelopmentUpdateDetected = { [weak self] version in
-            self?.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
+            guard let self else { return }
+
+            // 弹窗提示用户正在同步代码、后台编译并准备重启
+            let alert = NSAlert()
+            alert.messageText = "检测到新版本"
+            alert.informativeText = "已检测到云端有最新版本 \(version)。\n\n应用将自动合并云端最新代码，并在后台重新编译、打包及重启。\n\n此过程大约需要 15 秒，期间请勿重复点击更新。点击“确定”开始更新。"
+            alert.addButton(withTitle: "确定")
+            alert.runModal()
+
+            self.developmentBuildSync.syncToLatestIfPossible(targetVersion: version)
         }
 
         updateChecker.onDevelopmentNoUpdateDetected = { [weak self] in

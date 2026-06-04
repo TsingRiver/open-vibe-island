@@ -94,10 +94,14 @@ final class DevelopmentBuildSyncCoordinator {
         onStatusMessage?("检测到 Open Island 新版本 \(targetVersion)。正在同步本地仓库并重新构建 Open Island Dev…")
 
         syncTask = Task.detached(priority: .utility) {
-            let message = await Self.performSync(targetVersion: targetVersion, repoRoot: repoRoot)
+            let result = await Self.performSync(targetVersion: targetVersion, repoRoot: repoRoot)
             await MainActor.run {
-                self.isSyncInProgress = false
-                self.onStatusMessage?(message)
+                // 如果没有触发重新构建，说明同步在中间阶段取消或失败了，重置为 false 允许用户重试。
+                // 如果已经触发重新构建，我们将 isSyncInProgress 保持为 true，防止在进程退役前重复点击触发更新。
+                if !result.didLaunchRebuild {
+                    self.isSyncInProgress = false
+                }
+                self.onStatusMessage?(result.message)
             }
         }
     }
@@ -106,8 +110,11 @@ final class DevelopmentBuildSyncCoordinator {
     /// - Parameters:
     ///   - targetVersion: The newer appcast version Sparkle discovered.
     ///   - repoRoot: The source checkout embedded into the dev bundle metadata.
-    /// - Returns: A user-facing status message describing the outcome.
-    private static func performSync(targetVersion: String, repoRoot: URL) async -> String {
+    /// - Returns: A tuple containing the status message and whether a rebuild was launched.
+    private static func performSync(
+        targetVersion: String,
+        repoRoot: URL
+    ) async -> (message: String, didLaunchRebuild: Bool) {
         do {
             let statusResult = try runCommand(
                 executablePath: "/usr/bin/env",
@@ -115,10 +122,10 @@ final class DevelopmentBuildSyncCoordinator {
                 currentDirectoryURL: repoRoot
             )
             guard statusResult.exitCode == 0 else {
-                return commandFailureMessage(
+                return (commandFailureMessage(
                     action: "检查 Git 状态",
                     result: statusResult
-                )
+                ), false)
             }
 
             let fetchResult = try runCommand(
@@ -127,10 +134,10 @@ final class DevelopmentBuildSyncCoordinator {
                 currentDirectoryURL: repoRoot
             )
             guard fetchResult.exitCode == 0 else {
-                return commandFailureMessage(
+                return (commandFailureMessage(
                     action: "拉取 origin/main",
                     result: fetchResult
-                )
+                ), false)
             }
 
             let aheadBehindResult = try runCommand(
@@ -139,14 +146,14 @@ final class DevelopmentBuildSyncCoordinator {
                 currentDirectoryURL: repoRoot
             )
             guard aheadBehindResult.exitCode == 0 else {
-                return commandFailureMessage(
+                return (commandFailureMessage(
                     action: "读取 Ahead/Behind 提交计数",
                     result: aheadBehindResult
-                )
+                ), false)
             }
 
             guard let counts = DevelopmentBuildSyncPlan.parseAheadBehindCounts(aheadBehindResult.stdout) else {
-                return "开发版同步已跳过：无法解析 Git 的 Ahead/Behind 提交计数。"
+                return ("开发版同步已跳过：无法解析 Git 的 Ahead/Behind 提交计数。", false)
             }
 
             let action = DevelopmentBuildSyncPlan.action(
@@ -157,7 +164,7 @@ final class DevelopmentBuildSyncCoordinator {
 
             switch action {
             case .blocked(let reason):
-                return reason
+                return (reason, false)
             case .mergeAndRebuild:
                 let mergeResult = try runCommand(
                     executablePath: "/usr/bin/env",
@@ -171,16 +178,16 @@ final class DevelopmentBuildSyncCoordinator {
                         arguments: ["git", "merge", "--abort"],
                         currentDirectoryURL: repoRoot
                     )
-                    return "开发版同步已跳过：合并 origin/main 时检测到冲突。已自动放弃合并以还原工作区。"
+                    return ("开发版同步已跳过：合并 origin/main 时检测到冲突。已自动放弃合并以还原工作区。", false)
                 }
             case .rebuildOnly:
                 break
             }
 
             try launchRebuildScript(repoRoot: repoRoot)
-            return "检测到 Open Island 新版本 \(targetVersion)。正在从最新的仓库代码重新构建 Open Island Dev…"
+            return ("检测到 Open Island 新版本 \(targetVersion)。正在从最新的仓库代码重新构建 Open Island Dev…", true)
         } catch {
-            return "开发版同步失败：\(error.localizedDescription)"
+            return ("开发版同步失败：\(error.localizedDescription)", false)
         }
     }
 
