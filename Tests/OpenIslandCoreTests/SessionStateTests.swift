@@ -617,6 +617,45 @@ struct SessionStateTests {
     }
 
     @Test
+    func codexPermissionRequestWithAutoReviewDoesNotCreateManualApproval() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = BridgeServer(socketURL: socketURL)
+        try server.start()
+        defer { server.stop() }
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        let payload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .permissionRequest,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "codex-permission-auto-review",
+            transcriptPath: nil,
+            turnID: "turn-1",
+            toolName: "apply_patch",
+            toolUseID: "tool-use-1",
+            toolInput: CodexHookToolInput(description: "Apply a focused patch to Sources/App.swift"),
+            approvalsReviewer: "auto_review"
+        )
+
+        async let responseTask = sendOnGCDThread(.processCodexHook(payload), socketURL: socketURL)
+
+        var iterator = stream.makeAsyncIterator()
+        let startedEvent = try await nextEvent(from: &iterator)
+        let activityEvent = try await nextEvent(from: &iterator)
+        let response = try await responseTask
+
+        #expect(startedEvent.isSessionStarted)
+        #expect(!activityEvent.isPermissionRequested)
+        #expect(activityEvent.activityUpdate?.summary == "Codex auto-review is handling this tool approval.")
+        #expect(response == .acknowledged)
+    }
+
+    @Test
     func codexPermissionRequestReturnsDenyDirectiveAfterRejection() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = BridgeServer(socketURL: socketURL)
@@ -722,6 +761,45 @@ struct SessionStateTests {
         let response = try await responseTask
 
         #expect(activityEvent.activityUpdate?.summary == "Permission approved. Codex continued the command.")
+        #expect(response == .acknowledged)
+    }
+
+    @Test
+    func codexPreToolUseWithAutoReviewDoesNotCreateManualApproval() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = BridgeServer(socketURL: socketURL)
+        try server.start()
+        defer { server.stop() }
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        let payload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .preToolUse,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "codex-pretool-auto-review",
+            transcriptPath: nil,
+            turnID: "turn-1",
+            toolName: "Bash",
+            toolUseID: "tool-use-1",
+            toolInput: CodexHookToolInput(command: "swift test"),
+            approvalsReviewer: "auto_review"
+        )
+
+        async let responseTask = sendOnGCDThread(.processCodexHook(payload), socketURL: socketURL)
+
+        var iterator = stream.makeAsyncIterator()
+        let startedEvent = try await nextEvent(from: &iterator)
+        let activityEvent = try await nextEvent(from: &iterator)
+        let response = try await responseTask
+
+        #expect(startedEvent.isSessionStarted)
+        #expect(!activityEvent.isPermissionRequested)
+        #expect(activityEvent.activityUpdate?.summary == "Codex auto-review is handling this command approval.")
         #expect(response == .acknowledged)
     }
 

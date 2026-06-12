@@ -141,6 +141,10 @@ public struct CodexHookPayload: Equatable, Codable, Sendable {
     public var prompt: String?
     public var stopHookActive: Bool?
     public var lastAssistantMessage: String?
+    /// Codex approval reviewer selected for this turn. When this is
+    /// `auto_review`, Codex has delegated sandbox approval review to the
+    /// model and Open Island must not add a second manual approval gate.
+    public var approvalsReviewer: String?
 
     private enum CodingKeys: String, CodingKey {
         case cwd
@@ -163,6 +167,7 @@ public struct CodexHookPayload: Equatable, Codable, Sendable {
         case prompt
         case stopHookActive = "stop_hook_active"
         case lastAssistantMessage = "last_assistant_message"
+        case approvalsReviewer = "approvals_reviewer"
     }
 
     public init(
@@ -185,7 +190,8 @@ public struct CodexHookPayload: Equatable, Codable, Sendable {
         toolResponse: CodexHookJSONValue? = nil,
         prompt: String? = nil,
         stopHookActive: Bool? = nil,
-        lastAssistantMessage: String? = nil
+        lastAssistantMessage: String? = nil,
+        approvalsReviewer: String? = nil
     ) {
         self.cwd = cwd
         self.hookEventName = hookEventName
@@ -207,6 +213,7 @@ public struct CodexHookPayload: Equatable, Codable, Sendable {
         self.prompt = prompt
         self.stopHookActive = stopHookActive
         self.lastAssistantMessage = lastAssistantMessage
+        self.approvalsReviewer = approvalsReviewer
     }
 
     public init(from decoder: any Decoder) throws {
@@ -231,6 +238,7 @@ public struct CodexHookPayload: Equatable, Codable, Sendable {
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
         stopHookActive = try container.decodeIfPresent(Bool.self, forKey: .stopHookActive)
         lastAssistantMessage = try container.decodeIfPresent(String.self, forKey: .lastAssistantMessage)
+        approvalsReviewer = try container.decodeIfPresent(String.self, forKey: .approvalsReviewer)
     }
 }
 
@@ -406,6 +414,13 @@ public extension CodexHookPayload {
             currentTool: toolName,
             currentCommandPreview: commandPreview
         )
+    }
+
+    /// `auto_review` means Codex's own policy reviewer is expected to make
+    /// the approval decision. Open Island should observe the state, not block
+    /// the hook with its manual approval card.
+    var usesCodexAutoReviewApproval: Bool {
+        approvalsReviewer?.trimmingCharacters(in: .whitespacesAndNewlines) == "auto_review"
     }
 
     var implicitStartSummary: String {

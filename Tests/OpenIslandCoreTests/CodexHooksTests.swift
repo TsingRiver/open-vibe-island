@@ -115,6 +115,27 @@ struct CodexHooksTests {
     }
 
     @Test
+    func codexPayloadDetectsAutoReviewApprovalReviewer() throws {
+        let data = """
+        {
+          "cwd": "/tmp/demo",
+          "hook_event_name": "PermissionRequest",
+          "model": "gpt-5-codex",
+          "permission_mode": "default",
+          "session_id": "s1",
+          "approvals_reviewer": "auto_review",
+          "transcript_path": null,
+          "turn_id": "turn-1"
+        }
+        """.data(using: .utf8)!
+
+        let payload = try JSONDecoder().decode(CodexHookPayload.self, from: data)
+
+        #expect(payload.approvalsReviewer == "auto_review")
+        #expect(payload.usesCodexAutoReviewApproval)
+    }
+
+    @Test
     func codexHookOutputEncoderEncodesPermissionRequestAllowDecision() throws {
         let output = try CodexHookOutputEncoder.standardOutput(
             for: .codexHookDirective(.permissionRequest(.allow))

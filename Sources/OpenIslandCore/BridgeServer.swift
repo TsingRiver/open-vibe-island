@@ -521,6 +521,15 @@ public final class BridgeServer: @unchecked Sendable {
             synchronizeJumpTarget(for: payload)
             synchronizeCodexMetadata(for: payload)
 
+            if payload.usesCodexAutoReviewApproval {
+                acknowledgeCodexAutoReviewApproval(
+                    payload: payload,
+                    clientID: clientID,
+                    summary: "Codex auto-review is handling this command approval."
+                )
+                return
+            }
+
             let command = payload.commandPreview ?? "Bash command"
 
             let approvalEvent = AgentEvent.permissionRequested(
@@ -548,6 +557,15 @@ public final class BridgeServer: @unchecked Sendable {
             ensureSessionExists(for: payload)
             synchronizeJumpTarget(for: payload)
             synchronizeCodexMetadata(for: payload)
+
+            if payload.usesCodexAutoReviewApproval {
+                acknowledgeCodexAutoReviewApproval(
+                    payload: payload,
+                    clientID: clientID,
+                    summary: "Codex auto-review is handling this tool approval."
+                )
+                return
+            }
 
             emit(
                 .permissionRequested(
@@ -609,6 +627,28 @@ public final class BridgeServer: @unchecked Sendable {
             )
             send(.response(.acknowledged), to: clientID)
         }
+    }
+
+    /// Records that Codex is still active while leaving the approval decision
+    /// to Codex's own `auto_review` reviewer. This avoids registering a
+    /// pending Open Island approval that would force the user back into a
+    /// manual allow/deny card.
+    private func acknowledgeCodexAutoReviewApproval(
+        payload: CodexHookPayload,
+        clientID: UUID,
+        summary: String
+    ) {
+        emit(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: payload.sessionID,
+                    summary: summary,
+                    phase: .running,
+                    timestamp: .now
+                )
+            )
+        )
+        send(.response(.acknowledged), to: clientID)
     }
 
     private func handleClaudeHook(_ payload: ClaudeHookPayload, from clientID: UUID) {
