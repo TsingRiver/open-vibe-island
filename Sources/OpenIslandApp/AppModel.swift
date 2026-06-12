@@ -846,6 +846,19 @@ final class AppModel {
         }
     }
 
+    /// Measured by SwiftUI `GeometryReader` for the opened (hover) panel. Lets the
+    /// overlay window size to the real rendered content — including inline-expanded
+    /// completion bodies and chevron collapse — instead of row-height estimation.
+    /// Same 2pt tolerance as the notification measurement to avoid layout loops.
+    var measuredOpenedContentHeight: CGFloat = 0 {
+        didSet {
+            let delta = abs(measuredOpenedContentHeight - oldValue)
+            if delta >= 2, measuredOpenedContentHeight > 0 {
+                overlay.refreshOverlayPlacementIfVisible()
+            }
+        }
+    }
+
     var surfacedSessions: [AgentSession] {
         sessionBuckets.primary
     }

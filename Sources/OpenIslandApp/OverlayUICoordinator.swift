@@ -205,6 +205,10 @@ final class OverlayUICoordinator {
                 model: appModel,
                 preferredScreenID: preferredOverlayScreenID
             )
+        } else if status == .closed {
+            // Drop the opened-panel measurement so a reopen re-measures from
+            // current content instead of mis-sizing to a stale height.
+            appModel?.measuredOpenedContentHeight = 0
         }
 
         afterStateChange?()

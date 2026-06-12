@@ -16,6 +16,17 @@ private struct ContentHeightKey: PreferenceKey {
     }
 }
 
+/// Natural height of the opened (hover) session panel — header + list + footer.
+/// Measured by `GeometryReader` so the overlay window tracks the *actual* rendered
+/// content (including inline-expanded completion bodies and chevron collapse),
+/// instead of relying on row-height estimation that drifts on expand/collapse.
+private struct OpenedContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// Auto-height container: renders content directly (auto-sizing).
 /// When content exceeds maxHeight, wraps in ScrollView at fixed maxHeight.
 private struct AutoHeightScrollView<Content: View>: View {
@@ -530,7 +541,11 @@ struct IslandPanelView: View {
         model.notchOpenReason == .notification && actionableSessionID != nil
     }
 
-    private static let maxSessionListHeight: CGFloat = 560
+    /// Cap for the scrollable session list (rows area, excludes header/footer).
+    /// Sized to ~4 normal rows across 2 agent groups, while still letting a single
+    /// inline-expanded completion card show in full; beyond this the list scrolls.
+    /// Must match `OverlayPanelController.maxSessionListHeight`.
+    private static let maxSessionListHeight: CGFloat = 420
 
     private var sessionListSideInset: CGFloat {
         usesNotchAwareOpenedHeader ? 46 : 16
@@ -568,15 +583,33 @@ struct IslandPanelView: View {
                 VStack(spacing: 0) {
                     sessionPanelHeader(referenceDate: referenceDate)
 
-                    ScrollView(.vertical) {
+                    // Self-sizing list: takes the natural height of its rows up to
+                    // the 4-session cap, then scrolls. This makes the window track
+                    // the *real* content (expanded completion bodies, chevron
+                    // collapse) instead of an estimate that drifts on toggle.
+                    AutoHeightScrollView(maxHeight: Self.maxSessionListHeight) {
                         sessionRowsContent(referenceDate: referenceDate)
                     }
-                    .scrollIndicators(.hidden)
-                    .scrollBounceBehavior(.basedOnSize)
 
                     sessionPanelFooter
                 }
                 .padding(.vertical, 2)
+                // Report the true panel content height so the overlay window
+                // resizes to fit — no bottom gap when collapsed, no clipping
+                // when expanded.
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: OpenedContentHeightKey.self,
+                            value: geo.size.height
+                        )
+                    }
+                )
+                .onPreferenceChange(OpenedContentHeightKey.self) { height in
+                    if height > 0 {
+                        model.measuredOpenedContentHeight = height
+                    }
+                }
             }
         }
     }
