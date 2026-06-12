@@ -41,9 +41,10 @@ For Xcode: open `Package.swift`.
 
 ## Workflow
 
-- **Never edit in the main worktree.** Use `EnterWorktree` (preferred) or `git worktree add`, branched off latest local `main`.
-- Branch name matches topic: `feat/<topic>`, `fix/<topic>`. One coherent change per round.
-- `main` is protected — direct push is rejected. All changes ship via PR **targeting `main`**. No chain PRs (A → B → main) — wait for the dependency to merge, then rebase.
+- **Branch model — `local` is the integration + packaging branch.** It holds local work on top of the latest cloud release build (`local` = local changes + latest cloud package). Every dev `.app` is built from `local`.
+- **Feature/requirement work goes on a branch keyed to the work item** (`feat/<id-or-topic>`, `fix/<id-or-topic>`). Keep everything for one requirement on the **same** branch — do **not** spin up a new branch for every small fix or follow-up that belongs to the same work item; only a genuinely separate requirement earns its own branch. When the work item is done, merge it back into `local` and package from there. (Trivial in-flight commits made directly on `local` are fine when no distinct work item is in play.)
+- **Updating the cloud build:** switch to `main`, make the update there, then sync `main` back into `local` so `local` stays "local + latest cloud". `main` is protected — direct push is rejected; cloud changes ship via PR **targeting `main`** (no chain PRs — wait for the dependency to merge, then rebase).
+- This branch/packaging discipline applies to **every** AI/agent working in this repo, not just one assistant.
 - Conventional commit messages (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`). Never `--amend` unless asked.
 - After changes: run the matching verification (`swift build` / `swift test` / manual). If no check exists, say so in the summary and still commit.
 - Never `git reset --hard`, force-push, or overwrite user changes without explicit approval. If unexpected state appears, inspect — don't bulldoze.
