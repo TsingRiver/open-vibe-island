@@ -36,7 +36,7 @@ struct DevelopmentBuildSyncCoordinatorTests {
             behindCount: 3
         )
 
-        #expect(action == .fastForwardAndRebuild)
+        #expect(action == .mergeAndRebuild)
     }
 
     @Test
