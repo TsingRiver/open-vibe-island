@@ -11,13 +11,16 @@ final class OverlayPanelController {
     private static let openedContentWidthPadding: CGFloat = 0
     private static let openedContentBottomPadding: CGFloat = 0
     /// Must match `IslandPanelView.maxSessionListHeight` — the AutoHeightScrollView cap.
-    private static let maxSessionListHeight: CGFloat = 560
+    private static let maxSessionListHeight: CGFloat = 420
     private static let maxVisibleSessionRows: Int = 6
     private static let openedRowSpacing: CGFloat = 0
     // Content padding top + scroll padding + v8 list header/footer + bottom inset.
     // Rows are now full-width scan rows, so the old inter-card spacing is gone.
     private static let openedContentVerticalInsets: CGFloat = 84
     private static let notificationMeasuredContentPadding: CGFloat = 8
+    /// Small slack added to the measured opened-panel height so the bottom row
+    /// isn't visually flush against the surface edge.
+    private static let openedMeasuredContentPadding: CGFloat = 6
     private static let notificationEstimatedVerticalInsets: CGFloat = 36
     private static let openedEmptyStateHeight: CGFloat = 108
     private static let questionCardBaseHeight: CGFloat = 110
@@ -534,6 +537,16 @@ final class OverlayPanelController {
             return 300
         }
 
+        // Prefer the SwiftUI-measured panel height: it already reflects the real
+        // rendered content (expanded completion bodies, chevron collapse, the
+        // AutoHeightScrollView cap), so the window tracks it exactly — no clipping
+        // when expanded, no bottom gap when collapsed.
+        if model.measuredOpenedContentHeight > 0 {
+            return model.measuredOpenedContentHeight + Self.openedMeasuredContentPadding
+        }
+
+        // First render (before measurement lands): estimate from row heights so the
+        // initial window is close to final size and avoids a blank-panel flash.
         let rowHeights = visibleSessions.map { session -> CGFloat in
             if session.id == actionableID {
                 return session.estimatedIslandRowHeight(at: now)
