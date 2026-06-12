@@ -716,6 +716,18 @@ struct SetupSettingsPane: View {
                     }
                     Spacer()
                 }
+
+                Toggle(isOn: Binding(
+                    get: { model.deferCodexApprovalsToAutoReview },
+                    set: { model.deferCodexApprovalsToAutoReview = $0 }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(lang.t("settings.codex.deferAutoReview"))
+                        Text(lang.t("settings.codex.deferAutoReview.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             hookDiagnosticsSection

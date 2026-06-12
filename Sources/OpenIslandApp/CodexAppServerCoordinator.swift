@@ -31,6 +31,13 @@ final class CodexAppServerCoordinator {
     @ObservationIgnored
     var isSessionTracked: ((String) -> Bool)?
 
+    /// Returns `true` when the user has opted to let Codex's native
+    /// `auto_review` reviewer ("替我审批") handle approvals. When set, the
+    /// app-server "waiting on approval" state is surfaced as ordinary activity
+    /// instead of a blocking manual approval card, mirroring the hook path.
+    @ObservationIgnored
+    var shouldDeferApprovalsToAutoReview: (() -> Bool)?
+
     private(set) var isConnected = false
 
     // MARK: - Public API
@@ -129,17 +136,30 @@ final class CodexAppServerCoordinator {
             switch status.type {
             case .active:
                 if status.isWaitingOnApproval {
-                    onEvent?(.permissionRequested(
-                        PermissionRequested(
-                            sessionID: threadId,
-                            request: PermissionRequest(
-                                title: "Approval Required",
-                                summary: "Codex is waiting for approval.",
-                                affectedPath: ""
-                            ),
-                            timestamp: .now
-                        )
-                    ))
+                    if shouldDeferApprovalsToAutoReview?() == true {
+                        // User let Codex auto-review decide — don't raise a
+                        // manual approval card; just reflect ongoing activity.
+                        onEvent?(.activityUpdated(
+                            SessionActivityUpdated(
+                                sessionID: threadId,
+                                summary: "Codex auto-review is handling approval…",
+                                phase: .running,
+                                timestamp: .now
+                            )
+                        ))
+                    } else {
+                        onEvent?(.permissionRequested(
+                            PermissionRequested(
+                                sessionID: threadId,
+                                request: PermissionRequest(
+                                    title: "Approval Required",
+                                    summary: "Codex is waiting for approval.",
+                                    affectedPath: ""
+                                ),
+                                timestamp: .now
+                            )
+                        ))
+                    }
                 } else if status.isWaitingOnUserInput {
                     onEvent?(.questionAsked(
                         QuestionAsked(

@@ -81,6 +81,15 @@ public final class BridgeServer: @unchecked Sendable {
     /// overwritten whenever AppModel pushes a fresh snapshot.
     private var localState = SessionState()
 
+    /// When `true`, Open Island stops gating Codex command/tool approvals with
+    /// its own manual allow/deny card and instead acknowledges the hook without
+    /// a decision, letting Codex's native approval flow (its `auto_review`
+    /// reviewer / "替我审批") make the call. This is a user-controlled global
+    /// switch: Codex currently exposes no per-request reviewer signal at hook
+    /// time (see openai/codex#23465), so Open Island cannot auto-detect when to
+    /// step aside and must be told.
+    private var deferCodexApprovalsToAutoReview = false
+
     public init(
         socketURL: URL = BridgeSocketLocation.defaultURL
     ) {
@@ -175,6 +184,18 @@ public final class BridgeServer: @unchecked Sendable {
         queue.async { [self] in
             stateSnapshot = snapshot
             localState = snapshot
+        }
+    }
+
+    /// Pushes the user's "let Codex auto-review handle approvals" preference so
+    /// the hook handlers can decide, on the bridge's serial queue, whether to
+    /// raise a manual approval card or defer to Codex's native flow.
+    ///
+    /// - Parameter enabled: `true` to defer Codex approvals to its `auto_review`
+    ///   reviewer; `false` to keep Open Island's manual allow/deny card.
+    public func updateDeferCodexApprovalsToAutoReview(_ enabled: Bool) {
+        queue.async { [self] in
+            deferCodexApprovalsToAutoReview = enabled
         }
     }
 
@@ -521,7 +542,10 @@ public final class BridgeServer: @unchecked Sendable {
             synchronizeJumpTarget(for: payload)
             synchronizeCodexMetadata(for: payload)
 
-            if payload.usesCodexAutoReviewApproval {
+            // Defer to Codex's native approval flow when either Codex itself
+            // signals an auto_review reviewer (future-proofs openai/codex#23465)
+            // or the user has globally opted into letting Codex auto-review.
+            if payload.usesCodexAutoReviewApproval || deferCodexApprovalsToAutoReview {
                 acknowledgeCodexAutoReviewApproval(
                     payload: payload,
                     clientID: clientID,
@@ -558,7 +582,9 @@ public final class BridgeServer: @unchecked Sendable {
             synchronizeJumpTarget(for: payload)
             synchronizeCodexMetadata(for: payload)
 
-            if payload.usesCodexAutoReviewApproval {
+            // See the preToolUse branch: honour both Codex's own signal and the
+            // user's global "let Codex auto-review handle approvals" switch.
+            if payload.usesCodexAutoReviewApproval || deferCodexApprovalsToAutoReview {
                 acknowledgeCodexAutoReviewApproval(
                     payload: payload,
                     clientID: clientID,

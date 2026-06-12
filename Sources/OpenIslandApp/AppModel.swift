@@ -24,6 +24,7 @@ final class AppModel {
     private static let islandRightSlotDefaultsKey = "appearance.island.v6.rightSlot"
     private static let islandCenterLabelDefaultsKey = "appearance.island.v6.centerLabel"
     private static let showCodexUsageDefaultsKey = "app.showCodexUsage"
+    private static let deferCodexApprovalsToAutoReviewDefaultsKey = "app.deferCodexApprovalsToAutoReview"
     private static let completionReplyEnabledDefaultsKey = "feature.completionReply.enabled"
     private static let suppressFrontmostNotificationsDefaultsKey = "app.suppressFrontmostNotifications"
     private static let idleGlyphAnimationEnabledDefaultsKey = "app.idleGlyphAnimationEnabled"
@@ -269,6 +270,21 @@ final class AppModel {
             guard hasFinishedInit, completionReplyEnabled != oldValue else { return }
             UserDefaults.standard.set(completionReplyEnabled, forKey: Self.completionReplyEnabledDefaultsKey)
             refreshOverlayPlacementIfVisible()
+        }
+    }
+    /// When enabled, Open Island stops showing its manual allow/deny card for
+    /// Codex command/tool approvals and lets Codex's own `auto_review` reviewer
+    /// ("替我审批") decide. Needed because Codex exposes no per-request reviewer
+    /// signal at hook time (openai/codex#23465), so the routing is a user choice.
+    var deferCodexApprovalsToAutoReview: Bool = false {
+        didSet {
+            guard hasFinishedInit, deferCodexApprovalsToAutoReview != oldValue else { return }
+            UserDefaults.standard.set(
+                deferCodexApprovalsToAutoReview,
+                forKey: Self.deferCodexApprovalsToAutoReviewDefaultsKey
+            )
+            // Propagate immediately so in-flight Codex sessions pick up the change.
+            bridgeServer.updateDeferCodexApprovalsToAutoReview(deferCodexApprovalsToAutoReview)
         }
     }
     var suppressFrontmostNotifications: Bool = true {
@@ -641,6 +657,9 @@ final class AppModel {
             )
         }
         completionReplyEnabled = UserDefaults.standard.bool(forKey: Self.completionReplyEnabledDefaultsKey)
+        deferCodexApprovalsToAutoReview = UserDefaults.standard.bool(
+            forKey: Self.deferCodexApprovalsToAutoReviewDefaultsKey
+        )
         idleGlyphAnimationEnabled = UserDefaults.standard.bool(forKey: Self.idleGlyphAnimationEnabledDefaultsKey)
         processDiscoveryCadence = ProcessDiscoveryCadence(
             rawValue: UserDefaults.standard.string(forKey: Self.processDiscoveryCadenceDefaultsKey) ?? ""
@@ -777,6 +796,9 @@ final class AppModel {
         }
         codexAppServer.isSessionTracked = { [weak self] id in
             self?.state.session(id: id) != nil
+        }
+        codexAppServer.shouldDeferApprovalsToAutoReview = { [weak self] in
+            self?.deferCodexApprovalsToAutoReview ?? false
         }
 
         monitoring.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix
@@ -1218,6 +1240,9 @@ final class AppModel {
 
         do {
             try bridgeServer.start()
+            // Seed the bridge with the persisted approval-routing preference;
+            // the property's didSet is suppressed during init, so push it here.
+            bridgeServer.updateDeferCodexApprovalsToAutoReview(deferCodexApprovalsToAutoReview)
             connectBridgeObserver()
         } catch {
             isBridgeReady = false

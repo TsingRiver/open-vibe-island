@@ -34,6 +34,8 @@
 "settings.general.cadence.batterySaver" = "Battery Saver (10s)";
 "settings.general.energy.footer" = "Lower settings reduce battery use. Slower scans take a little longer to detect agents started without a hook.";
 "settings.general.showCodexUsage" = "Show Codex usage";
+"settings.codex.deferAutoReview" = "Let Codex auto-review approvals";
+"settings.codex.deferAutoReview.desc" = "When on, Open Island won't show its own approve/deny card for Codex commands — it defers to Codex's own auto-review reviewer (\"approve for me\") instead.";
 "settings.general.completionReply" = "Reply from completion card";
 "settings.general.cliHooks" = "CLI Hooks";
 "settings.general.activated" = "Activated";

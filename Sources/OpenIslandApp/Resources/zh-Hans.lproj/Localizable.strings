@@ -34,6 +34,8 @@
 "settings.general.cadence.batterySaver" = "省电(10 秒)";
 "settings.general.energy.footer" = "更低的设置可减少耗电。扫描越慢,检测未配置 hook 的会话会略慢一些。";
 "settings.general.showCodexUsage" = "显示 Codex 用量";
+"settings.codex.deferAutoReview" = "让 Codex 自动审批（替我审批）";
+"settings.codex.deferAutoReview.desc" = "开启后，Open Island 不再为 Codex 命令弹出自己的允许/拒绝卡片，而是交给 Codex 自带的 auto-review（替我审批）来决定。";
 "settings.general.completionReply" = "在完成卡片中回复";
 "settings.general.cliHooks" = "CLI Hooks";
 "settings.general.activated" = "已激活";

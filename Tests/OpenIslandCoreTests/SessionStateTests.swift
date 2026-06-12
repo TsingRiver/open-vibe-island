@@ -804,6 +804,49 @@ struct SessionStateTests {
     }
 
     @Test
+    func codexPermissionRequestDefersToAutoReviewWhenGloballyEnabled() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = BridgeServer(socketURL: socketURL)
+        try server.start()
+        defer { server.stop() }
+        // Simulate the user toggling "let Codex auto-review approvals" on.
+        // Codex sends no approvals_reviewer field (openai/codex#23465), so the
+        // global switch is the only signal available to step aside.
+        server.updateDeferCodexApprovalsToAutoReview(true)
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        let payload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .permissionRequest,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "codex-permission-global-defer",
+            transcriptPath: nil,
+            turnID: "turn-1",
+            toolName: "apply_patch",
+            toolUseID: "tool-use-1",
+            toolInput: CodexHookToolInput(description: "Apply a focused patch to Sources/App.swift")
+            // Note: no approvalsReviewer — proves the global switch alone defers.
+        )
+
+        async let responseTask = sendOnGCDThread(.processCodexHook(payload), socketURL: socketURL)
+
+        var iterator = stream.makeAsyncIterator()
+        let startedEvent = try await nextEvent(from: &iterator)
+        let activityEvent = try await nextEvent(from: &iterator)
+        let response = try await responseTask
+
+        #expect(startedEvent.isSessionStarted)
+        #expect(!activityEvent.isPermissionRequested)
+        #expect(activityEvent.activityUpdate?.summary == "Codex auto-review is handling this tool approval.")
+        #expect(response == .acknowledged)
+    }
+
+    @Test
     func codexHookUpdatesJumpTargetWhenLaterHooksLearnMoreAboutTheTerminal() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = BridgeServer(socketURL: socketURL)
